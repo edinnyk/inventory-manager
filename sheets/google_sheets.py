@@ -3,7 +3,7 @@ from datetime import date
 import gspread
 from google.oauth2.service_account import Credentials
 
-from config import GOOGLE_CREDENTIALS, SHEET_ID
+from config import SHEET_ID, get_google_credentials
 from sheets.schema import HEADERS
 
 SCOPE = [
@@ -13,7 +13,7 @@ SCOPE = [
 
 
 def _get_worksheet():
-    credentials = Credentials.from_service_account_info(GOOGLE_CREDENTIALS, scopes=SCOPE)
+    credentials = Credentials.from_service_account_info(get_google_credentials(), scopes=SCOPE)
     client = gspread.authorize(credentials)
     sheet = client.open_by_key(SHEET_ID)
     return sheet.sheet1
