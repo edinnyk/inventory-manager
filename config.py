@@ -31,3 +31,5 @@ if not SHEET_ID:
 GOOGLE_CREDENTIALS = _load_google_credentials()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
+AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.openai.com/v1")

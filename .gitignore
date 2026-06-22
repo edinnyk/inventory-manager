@@ -1,7 +1,13 @@
 .env
 .env.txt
-*.txt
-*.json
 __pycache__/
 *.pyc
 .DS_Store
+
+# Secrets — never commit these
+*.txt
+*.json
+!PLAN.txt
+!GIT_GUIDE.txt
+!SETUP.md
+!requirements.txt

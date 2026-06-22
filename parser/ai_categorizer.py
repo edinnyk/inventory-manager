@@ -1,4 +1,4 @@
-from config import OPENAI_API_KEY
+from config import AI_BASE_URL, AI_MODEL, OPENAI_API_KEY
 
 CATEGORIES_LIST = [
     "Electronics", "Furniture", "Office Supplies", "Food & Beverage",
@@ -11,7 +11,7 @@ def ai_categorize(item_name: str) -> str | None:
         return None
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = OpenAI(api_key=OPENAI_API_KEY, base_url=AI_BASE_URL)
         prompt = (
             f"Categorize this inventory item into exactly one category from the list below. "
             f"Respond with only the category name, nothing else.\n\n"
@@ -19,7 +19,7 @@ def ai_categorize(item_name: str) -> str | None:
             f"Item: {item_name}"
         )
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=AI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
             temperature=0,

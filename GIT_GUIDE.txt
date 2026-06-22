@@ -1,0 +1,48 @@
+GIT WORKFLOW GUIDE (Windows)
+=============================
+
+--- HOW GIT WORKS ---
+
+Git tracks changes in your project folder. The workflow is:
+  Edit files → git add (stage) → git commit (save snapshot) → git push (upload to GitHub)
+
+--- DAILY COMMANDS ---
+
+Check what's changed:
+  git status                      # see modified/new/deleted files
+  git diff                        # see the actual changes in unstaged files
+  git diff --staged               # see what will be committed
+
+Stage and commit:
+  git add .                       # stage ALL changes
+  git add filename.py             # stage just one file
+  git commit -m "what you did"    # save the snapshot
+
+Push/pull:
+  git push                         # upload commits to GitHub
+  git pull                         # download latest from GitHub
+
+--- UNDO/RESET ---
+
+Unstage a file (keep changes):
+  git restore --staged filename.py
+
+Discard unstaged changes:
+  git restore filename.py
+
+Undo last commit (keep changes in working dir):
+  git reset --soft HEAD~1
+
+--- FIRST TIME SETUP ---
+
+One-time only:
+  git remote add origin https://github.com/YOUR_USERNAME/REPO_NAME.git
+  git branch -M main
+  git push -u origin main
+
+--- TIPS ---
+
+  - Always run git status before committing to see what will go in
+  - The .gitignore file tells git to ignore files like .env, secrets, __pycache__
+  - Do NOT commit API keys, tokens, or passwords
+  - If push is rejected, run git pull first then try again

@@ -70,20 +70,14 @@ Replace the values with what you saved in Steps 1-3.
 
 ## Step 5 — Push to GitHub
 
-```bash
-cd "C:\Users\edinn\OneDrive\Desktop\InventoryManager"
-git init
-git add .
-git commit -m "Initial commit"
-```
-
-Then create a repository on GitHub (free, public or private) and push:
-
-```bash
+```cmd
+cd "C:\Users\edinn\InventoryManager"
 git remote add origin https://github.com/YOUR_USERNAME/inventory-manager.git
 git branch -M main
 git push -u origin main
 ```
+
+Create a repository on GitHub first (free, public or private) — don't add a README or .gitignore when creating it.
 
 ---
 
@@ -127,6 +121,17 @@ The bot should reply with a summary. Check your Google Sheet — the rows should
 
 ## Optional: Enable AI Categorization
 
-1. Get an OpenAI API key from https://platform.openai.com/api-keys (costs ~$0.01 per 100 items)
-2. Add it to Railway variables: `OPENAI_API_KEY=sk-your-key-here`
-3. In Discord, type `/toggle-ai` to enable it
+Get an API key from an OpenAI-compatible provider and add it to Railway variables:
+
+| Provider | Base URL | Model | Free Tier |
+|----------|----------|-------|-----------|
+| **OpenAI** | `https://api.openai.com/v1` | `gpt-4o-mini` | No |
+| **DeepSeek** | `https://api.deepseek.com` | `deepseek-chat` | No, but cheap |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | `deepseek-chat` (or many others) | Some free models |
+
+In Railway variables, set:
+- `OPENAI_API_KEY` = your key
+- `AI_BASE_URL` = the provider's base URL
+- `AI_MODEL` = the model name you want
+
+Then in Discord, type `/toggle-ai` to enable it.
