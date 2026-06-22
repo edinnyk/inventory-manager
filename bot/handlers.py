@@ -105,3 +105,48 @@ async def toggle_ai(interaction: discord.Interaction):
     ai_enabled = not ai_enabled
     status = "enabled" if ai_enabled else "disabled"
     await interaction.response.send_message(f"AI categorization {status}.", ephemeral=True)
+
+
+@tree.command(name="diag", description="Test Google Sheets connection")
+async def diag(interaction: discord.Interaction):
+    try:
+        from config import get_google_credentials
+        try:
+            creds = get_google_credentials()
+            email = creds.get("client_email", "MISSING")
+        except Exception as e:
+            await interaction.response.send_message(f"Credentials error: {e}", ephemeral=True)
+            return
+
+        from google.oauth2.service_account import Credentials
+        import gspread
+
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        try:
+            gc = gspread.authorize(Credentials.from_service_account_info(creds, scopes=scopes))
+        except Exception as e:
+            await interaction.response.send_message(f"Auth error: {e}", ephemeral=True)
+            return
+
+        try:
+            sheet = gc.open_by_key(SHEET_ID)
+            first_row = sheet.sheet1.get_all_values()
+            await interaction.response.send_message(
+                f"**Connected**\nSheet: {sheet.title}\nRows: {len(first_row)}\nEmail: {email}",
+                ephemeral=True,
+            )
+        except gspread.exceptions.APIError as e:
+            await interaction.response.send_message(
+                f"**Cannot open sheet**\nEmail on sheet: {email}\nSheet ID: {SHEET_ID}\n\n"
+                f"1. Open {SHEET_URL}\n"
+                f"2. Click Share\n"
+                f"3. Add `{email}` as Editor\n"
+                f"4. Also verify Google Sheets API is enabled at:\n"
+                f"   https://console.cloud.google.com/apis/library/sheets.googleapis.com",
+                ephemeral=True,
+            )
+    except Exception as e:
+        await interaction.response.send_message(f"Diagnostic error: {e}", ephemeral=True)
