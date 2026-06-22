@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,6 +15,11 @@ if not DISCORD_TOKEN:
 SHEET_ID = os.getenv("SHEET_ID", "").strip()
 if not SHEET_ID:
     raise ValueError("SHEET_ID is not set")
+
+# Handle full Google Sheets URL instead of just the ID
+m = re.search(r"/d/([a-zA-Z0-9_-]+)", SHEET_ID)
+if m:
+    SHEET_ID = m.group(1)
 
 _google_creds_cache: dict | None = None
 
