@@ -7,11 +7,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 if not DISCORD_TOKEN:
     raise ValueError("DISCORD_TOKEN is not set")
 
-SHEET_ID = os.getenv("SHEET_ID")
+SHEET_ID = os.getenv("SHEET_ID", "").strip()
 if not SHEET_ID:
     raise ValueError("SHEET_ID is not set")
 
@@ -23,7 +23,8 @@ def get_google_credentials() -> dict:
     if _google_creds_cache is not None:
         return _google_creds_cache
 
-    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip().strip("'\"")
+
     if not raw:
         raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON is not set")
 

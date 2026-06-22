@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 
 import gspread
@@ -6,16 +7,22 @@ from google.oauth2.service_account import Credentials
 from config import SHEET_ID, get_google_credentials
 from sheets.schema import HEADERS
 
+logger = logging.getLogger(__name__)
+
 SCOPE = [
-    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
 
 def _get_worksheet():
-    credentials = Credentials.from_service_account_info(get_google_credentials(), scopes=SCOPE)
+    creds = get_google_credentials()
+    logger.info("got google credentials, client_email=%s", creds.get("client_email", "UNKNOWN"))
+    credentials = Credentials.from_service_account_info(creds, scopes=SCOPE)
     client = gspread.authorize(credentials)
+    logger.info("authorized, opening sheet by key: %s...", SHEET_ID[:10] if len(SHEET_ID) > 10 else SHEET_ID)
     sheet = client.open_by_key(SHEET_ID)
+    logger.info("sheet opened successfully")
     return sheet.sheet1
 
 
