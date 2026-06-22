@@ -19,26 +19,29 @@ SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
 async def inv(interaction: discord.Interaction, items: str):
     await interaction.response.defer()
 
-    parsed = extract_items(items)
-    if not parsed:
-        await interaction.followup.send("Couldn't parse any items. Try: `/inv 5 laptops and 3 chairs`")
-        return
+    try:
+        parsed = extract_items(items)
+        if not parsed:
+            await interaction.followup.send("Couldn't parse any items. Try: `/inv 5 laptops and 3 chairs`")
+            return
 
-    categorized = categorize_items(parsed, use_ai=ai_enabled, custom_categories=custom_categories)
+        categorized = categorize_items(parsed, use_ai=ai_enabled, custom_categories=custom_categories)
 
-    lines = []
-    for item_name, category, quantity in categorized:
-        append_entry(item_name, category, quantity)
-        lines.append(f"**{item_name}** — {quantity} ({category})")
+        lines = []
+        for item_name, category, quantity in categorized:
+            append_entry(item_name, category, quantity)
+            lines.append(f"**{item_name}** — {quantity} ({category})")
 
-    embed = discord.Embed(
-        title="Inventory Added",
-        description="\n".join(lines),
-        color=discord.Color.green(),
-        timestamp=datetime.now(),
-    )
-    embed.set_footer(text=f"View sheet: {SHEET_URL}")
-    await interaction.followup.send(embed=embed)
+        embed = discord.Embed(
+            title="Inventory Added",
+            description="\n".join(lines),
+            color=discord.Color.green(),
+            timestamp=datetime.now(),
+        )
+        embed.set_footer(text=f"View sheet: {SHEET_URL}")
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}")
 
 
 @tree.command(name="categories", description="List all categories and their keywords")
@@ -73,22 +76,25 @@ async def sheet(interaction: discord.Interaction):
 
 @tree.command(name="recent", description="Show recent inventory entries")
 async def recent(interaction: discord.Interaction, n: int = 5):
-    rows = get_recent(n)
-    if not rows:
-        await interaction.response.send_message("No entries yet.")
-        return
+    try:
+        rows = get_recent(n)
+        if not rows:
+            await interaction.response.send_message("No entries yet.")
+            return
 
-    lines = []
-    for row in reversed(rows):
-        padded = row + [""] * (6 - len(row))
-        lines.append(f"**{padded[0]}** | {padded[2]}x {padded[1]} — {padded[3]}")
+        lines = []
+        for row in reversed(rows):
+            padded = row + [""] * (6 - len(row))
+            lines.append(f"**{padded[0]}** | {padded[2]}x {padded[1]} — {padded[3]}")
 
-    embed = discord.Embed(
-        title=f"Last {len(rows)} Entries",
-        description="\n".join(lines),
-        color=discord.Color.purple(),
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+        embed = discord.Embed(
+            title=f"Last {len(rows)} Entries",
+            description="\n".join(lines),
+            color=discord.Color.purple(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
 
 @tree.command(name="toggle-ai", description="Enable or disable AI categorization")
