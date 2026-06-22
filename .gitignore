@@ -11,3 +11,5 @@ __pycache__/
 !GIT_GUIDE.txt
 !SETUP.md
 !requirements.txt
+!runtime.txt
+!railway.json
