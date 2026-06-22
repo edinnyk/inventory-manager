@@ -12,5 +12,6 @@ tree = app_commands.CommandTree(bot)
 
 @bot.event
 async def on_ready():
-    await tree.sync()
-    print(f"Bot logged in as {bot.user}")
+    for guild in bot.guilds:
+        await tree.sync(guild=discord.Object(id=guild.id))
+    print(f"Bot logged in as {bot.user} in {len(bot.guilds)} guild(s)")
