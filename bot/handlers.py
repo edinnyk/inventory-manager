@@ -118,33 +118,35 @@ async def diag(interaction: discord.Interaction):
             await interaction.response.send_message(f"Credentials error: {e}", ephemeral=True)
             return
 
+        from google.auth.transport.requests import Request as AuthRequest
         from google.oauth2.service_account import Credentials
-        import gspread
+        import requests
 
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
         ]
-        try:
-            gc = gspread.authorize(Credentials.from_service_account_info(creds, scopes=scopes))
-        except Exception as e:
-            await interaction.response.send_message(f"Auth error: {e}", ephemeral=True)
-            return
+        credentials = Credentials.from_service_account_info(creds, scopes=scopes)
+        credentials.refresh(AuthRequest())
 
-        try:
-            sheet = gc.open_by_key(SHEET_ID)
-            first_row = sheet.sheet1.get_all_values()
+        session = requests.Session()
+        session.headers.update({"Authorization": f"Bearer {credentials.token}"})
+        resp = session.get(f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}")
+        if resp.status_code == 200:
+            data = resp.json()
+            title = data.get("properties", {}).get("title", "?")
             await interaction.response.send_message(
-                f"**Connected**\nSheet: {sheet.title}\nRows: {len(first_row)}\nEmail: {email}",
+                f"**Connected**\nSheet: {title}\nEmail: {email}",
                 ephemeral=True,
             )
-        except gspread.exceptions.APIError as e:
+        else:
             await interaction.response.send_message(
-                f"**Cannot open sheet**\nEmail on sheet: {email}\nSheet ID: {SHEET_ID}\n\n"
+                f"**Cannot open sheet** (HTTP {resp.status_code})\n"
+                f"Email: {email}\nSheet ID: {SHEET_ID}\n\n"
                 f"1. Open {SHEET_URL}\n"
                 f"2. Click Share\n"
                 f"3. Add `{email}` as Editor\n"
-                f"4. Also verify Google Sheets API is enabled at:\n"
+                f"4. Verify API enabled:\n"
                 f"   https://console.cloud.google.com/apis/library/sheets.googleapis.com",
                 ephemeral=True,
             )
