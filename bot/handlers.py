@@ -41,7 +41,8 @@ async def inv(interaction: discord.Interaction, items: str):
         embed.set_footer(text=f"View sheet: {SHEET_URL}")
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        await interaction.followup.send(f"Error: {e}")
+        msg = str(e)[:500] if "APIError" in type(e).__name__ else str(e)
+        await interaction.followup.send(f"Error: {msg}\n\nCheck that SHEET_ID and Google credentials are correct in Railway variables.")
 
 
 @tree.command(name="categories", description="List all categories and their keywords")
@@ -94,7 +95,8 @@ async def recent(interaction: discord.Interaction, n: int = 5):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
-        await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+        msg = str(e)[:500]
+        await interaction.response.send_message(f"Error: {msg}", ephemeral=True)
 
 
 @tree.command(name="toggle-ai", description="Enable or disable AI categorization")
