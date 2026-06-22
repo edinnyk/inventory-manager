@@ -28,20 +28,26 @@ try:
 
     if creds:
         try:
+            from google.auth.transport.requests import Request as AuthRequest
             from google.oauth2.service_account import Credentials
-            import gspread
+            import requests
 
             scopes = [
                 "https://www.googleapis.com/auth/spreadsheets",
                 "https://www.googleapis.com/auth/drive",
             ]
-            gc = gspread.authorize(Credentials.from_service_account_info(creds, scopes=scopes))
-            logger.info("SHEETS auth: authorized successfully")
+            credentials = Credentials.from_service_account_info(creds, scopes=scopes)
+            credentials.refresh(AuthRequest())
 
-            sheet = gc.open_by_key(SHEET_ID)
-            logger.info("SHEETS open_by_key: SUCCESS - title=%s", sheet.title)
-        except gspread.exceptions.APIError as e:
-            logger.error("SHEETS API error: %s", str(e)[:500])
+            session = requests.Session()
+            session.headers.update({"Authorization": f"Bearer {credentials.token}"})
+
+            resp = session.get(f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}")
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info("SHEETS API: SUCCESS - title=%s", data.get("properties", {}).get("title", "?"))
+            else:
+                logger.error("SHEETS API error (%d): %s", resp.status_code, resp.text[:300])
         except Exception as e:
             logger.error("SHEETS unexpected error: %s", e)
 
