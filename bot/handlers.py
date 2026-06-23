@@ -1,3 +1,5 @@
+import os
+
 import discord
 
 from bot.discord_bot import tree
@@ -198,3 +200,9 @@ async def rename_variant(interaction: discord.Interaction, old: str, new: str):
 @tree.command(name="sheet", description="Get the Google Sheet link")
 async def sheet(interaction: discord.Interaction):
     await interaction.response.send_message(SHEET_URL)
+
+
+@tree.command(name="version", description="Show the deployed git commit hash")
+async def version(interaction: discord.Interaction):
+    commit = os.getenv("RAILWAY_GIT_COMMIT", "unknown (local dev)")
+    await interaction.response.send_message(f"Commit: `{commit}`", ephemeral=True)
