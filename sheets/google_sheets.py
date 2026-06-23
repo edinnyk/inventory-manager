@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import date
 
 import requests
@@ -28,18 +29,25 @@ def _get_authorized_session() -> requests.Session:
     return session
 
 
-def _get_worksheet():
+def _get_spreadsheet():
     session = _get_authorized_session()
     resp = session.get(f"{API_BASE}/{SHEET_ID}")
     if resp.status_code != 200:
         raise RuntimeError(f"Sheets API error ({resp.status_code}): {resp.text[:500]}")
     data = resp.json()
-    logger.info("opened sheet: %s", data.get("properties", {}).get("title", "?"))
-    return session, data
+    sheet_name = data["sheets"][0]["properties"]["title"]
+    logger.info("opened sheet: %s tab: %s", data.get("properties", {}).get("title", "?"), sheet_name)
+    return session, sheet_name
 
 
-def _ensure_headers(session, sheet_data):
-    range_ = f"'{sheet_data['properties']['title']}'!A1:F1"
+def _range(sheet_name: str, cols: str) -> str:
+    if re.search(r"[^\w]", sheet_name):
+        return f"'{sheet_name}'!{cols}"
+    return f"{sheet_name}!{cols}"
+
+
+def _ensure_headers(session, sheet_name):
+    range_ = _range(sheet_name, "A1:F1")
     resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
     if resp.status_code == 200:
         existing = resp.json().get("values", [])
@@ -61,11 +69,11 @@ def _ensure_headers(session, sheet_data):
 
 
 def append_entry(item_name: str, category: str, quantity: int, notes: str = "", unit: str = "units"):
-    session, sheet_data = _get_worksheet()
-    _ensure_headers(session, sheet_data)
+    session, sheet_name = _get_spreadsheet()
+    _ensure_headers(session, sheet_name)
     today = date.today().isoformat()
     row = [item_name, category, str(quantity), today, notes, unit]
-    range_ = f"'{sheet_data['properties']['title']}'!A:F"
+    range_ = _range(sheet_name, "A:F")
     body = {"values": [row]}
     resp = session.post(f"{API_BASE}/{SHEET_ID}/values/{range_}:append", params={"valueInputOption": "USER_ENTERED"}, json=body)
     if resp.status_code != 200:
@@ -73,8 +81,8 @@ def append_entry(item_name: str, category: str, quantity: int, notes: str = "", 
 
 
 def get_recent(n: int = 5):
-    session, sheet_data = _get_worksheet()
-    range_ = f"'{sheet_data['properties']['title']}'!A:F"
+    session, sheet_name = _get_spreadsheet()
+    range_ = _range(sheet_name, "A:F")
     resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
     if resp.status_code != 200:
         raise RuntimeError(f"read failed ({resp.status_code}): {resp.text[:300]}")
