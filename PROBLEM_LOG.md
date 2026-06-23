@@ -1,21 +1,39 @@
 # Problem Log
 
-A chronological log of every issue encountered, its cause, and how it was resolved (or status if unresolved).
+Chronological log of every issue encountered, what was attempted, and what the final solution was.
 
 ---
 
 ## P1 — gspread library returns HTML error pages
 
-**Date:** Session 1
+**Date:** Session 1 (pre-v2), first deployment attempt
 **Status:** Resolved
 
-**Symptoms:** Bot running on Railway calls `gspread` to authenticate and read/write the sheet, but the library returns raw HTML "Page Not Found" pages instead of proper JSON API responses.
+### Problem
+The bot was running on Railway, connected to Discord, but every call to the Google Sheets API returned raw HTML "Page Not Found" pages instead of JSON. The sheet was never written to.
 
-**Root Cause:** Unknown. `gspread`'s underlying HTTP client (`urllib3`/`requests`) was receiving non-JSON responses from the Google API. Possibly related to how Railway's runtime or Python version handled SSL/TLS or redirects. Could not be reproduced locally.
+### What was attempted
+1. Triple-checked service account JSON and SHEET_ID in Railway variables — correct
+2. Checked that the service account had Editor access on the sheet — correct
+3. Added startup diagnostics to `main.py` to log the exact API response — confirmed it was HTML
+4. Tried different Python versions in `runtime.txt` — no change
+5. Confirmed the same code worked locally (Windows) — it did
 
-**Fix:** Replaced `gspread` entirely with direct HTTP calls using `requests` + `google-auth`. All Google Sheets API calls now go through `requests.Session` with a manually refreshed Bearer token.
+### Root cause
+`gspread` library (the original Google Sheets wrapper) was making HTTP requests through its own client stack (`urllib3`/`google-api-python-client`) that somehow received non-JSON responses on Railway. The exact mechanism was never determined — likely a combination of Railway's network layer and `gspread`'s outdated HTTP handling.
 
-**Files changed:** `sheets/google_sheets.py` (full rewrite), `requirements.txt` (removed `gspread`)
+### Solution
+Replaced `gspread` entirely with direct HTTP requests using the standard `requests` library + `google-auth`. The bot now manually:
+1. Loads the service account JSON
+2. Creates `google.oauth2.service_account.Credentials`
+3. Calls `credentials.refresh()` to get an access token
+4. Passes the token as a `Bearer` header in plain `requests` calls
+
+This gave us full control over the HTTP layer.
+
+### Files changed
+- `sheets/google_sheets.py` — full rewrite from gspread to raw requests
+- `requirements.txt` — removed `gspread`, added `requests`
 
 ---
 
@@ -24,15 +42,27 @@ A chronological log of every issue encountered, its cause, and how it was resolv
 **Date:** Session 1
 **Status:** Resolved
 
-**Symptoms:** Bot starts but cannot authenticate with Google. Error: "GOOGLE_SERVICE_ACCOUNT_JSON is neither valid JSON nor an existing file path."
+### Problem
+Bot started, connected to Discord, but every sheet operation failed with: "GOOGLE_SERVICE_ACCOUNT_JSON is neither valid JSON nor an existing file path."
 
-**Root Cause:** Two issues:
-1. Railway wraps env vars in quotes when pasting multi-line JSON → `"'{...}'"` is not valid JSON
-2. The original code only loaded from a file path, but Railway variables contain the raw JSON string directly
+### What was attempted
+1. Verified the JSON was pasted correctly into Railway variables — looked correct
+2. Added debug logging to print the first/last characters of the raw env var — discovered quotes around it
+3. Tested locally with `.env` file pointing to `credentials.json` — worked fine
+4. Realized the code didn't distinguish between a JSON string and a file path
 
-**Fix:** Added `.strip().strip("'\"")` to remove surrounding quotes. Added JSON string detection (starts with `{`) separate from file path detection. Added lazy caching via `_google_creds_cache` so the bot starts even if credentials fail (error surfaces at command time).
+### Root cause
+Two independent issues:
+1. Railway's variable editor wraps multi-line values in smart quotes when pasting. The env var contained `"'{...}'"` instead of `{...}`
+2. The original code assumed the env var was always a file path and called `json.load(open(path))`. On Railway, the value IS the JSON content, not a file path
 
-**Files changed:** `config.py`
+### Solution
+1. Added `.strip().strip("'\"")` to remove surrounding quote characters
+2. Added detection: if the value starts with `{`, parse it as JSON directly. Otherwise, treat it as a file path
+3. Added lazy caching (`_google_creds_cache`) so the bot starts even if credentials are missing — errors surface only when a sheet command is used
+
+### Files changed
+- `config.py` — `get_google_credentials()` function
 
 ---
 
@@ -41,13 +71,27 @@ A chronological log of every issue encountered, its cause, and how it was resolv
 **Date:** Session 1
 **Status:** Resolved
 
-**Symptoms:** API returns 400 errors. SHEET_ID is set to `https://docs.google.com/spreadsheets/d/.../edit` instead of just the ID string.
+### Problem
+Every sheet API call returned HTTP 400 errors. The bot logs showed `SHEET_ID: https://docs.google.com/spreadsheets/d/1ffdi9-WLfi_.../edit`.
 
-**Root Cause:** Users copy-paste the full URL from the browser address bar.
+### What was attempted
+1. Verified the SHEET_ID in Railway variables was copied from the browser address bar — it was the full URL
+2. Tried asking the user to extract just the ID — error-prone and confusing
 
-**Fix:** Added regex extraction in `config.py`: `re.search(r"/d/([a-zA-Z0-9_-]+)", SHEET_ID)`. If a URL is detected, the ID is extracted automatically. Also added `.strip()` to handle whitespace.
+### Root cause
+Users naturally copy the entire URL from the browser address bar instead of manually extracting the 44-character ID string.
 
-**Files changed:** `config.py`
+### Solution
+Added automatic URL-to-ID extraction in `config.py`:
+```python
+m = re.search(r"/d/([a-zA-Z0-9_-]+)", SHEET_ID)
+if m:
+    SHEET_ID = m.group(1)
+```
+Also added `.strip()` to handle accidental whitespace. Now users can paste either the bare ID or the full URL and both work.
+
+### Files changed
+- `config.py`
 
 ---
 
@@ -56,78 +100,155 @@ A chronological log of every issue encountered, its cause, and how it was resolv
 **Date:** Session 1
 **Status:** Resolved
 
-**Symptoms:** Every call to append a row fails with `400 INVALID_ARGUMENT: Unable to parse range: 'Inventory Manager'!A:F`.
+### Problem
+After fixing P1-P3, the bot still failed on every sheet write with:
+```
+400 INVALID_ARGUMENT: Unable to parse range: 'Inventory Manager'!A:F
+```
 
-**Root Cause:** The code used `sheet_data['properties']['title']` which returns the SPREADSHEET title ("Inventory Manager"), not the SHEET TAB name (default "Sheet1"). Google Sheets API range syntax requires the tab name, not the spreadsheet name.
+### What was attempted
+1. Verified the sheet name — it was "Inventory Manager"
+2. Tried different quoting styles (double quotes, no quotes) — same error
+3. Manually tested the range via the Sheets API explorer — discovered the tab name wasn't "Inventory Manager"
 
-**Fix:** Changed to `data["sheets"][0]["properties"]["title"]` which accesses the first sheet tab's actual title. Added a `_range()` helper that wraps the name in single quotes only if it contains non-word characters (spaces, punctuation).
+### Root cause
+The code used `sheet_data['properties']['title']` from the spreadsheet metadata. This returns the **spreadsheet file name** ("Inventory Manager"), not the **sheet tab name** (default "Sheet1"). The Google Sheets API range syntax `'Sheet Name'!A:F` requires the tab name, not the file name.
 
-**Files changed:** `sheets/google_sheets.py`
+The terms are:
+- **Spreadsheet** = the entire file (has a title like "Inventory Manager")
+- **Sheet/Tab** = one tab within the file (has a title like "Sheet1", "Inventory", etc.)
+
+### Solution
+Changed to `data["sheets"][0]["properties"]["title"]` which gets the first tab's actual title. Added a `_range()` helper that auto-quotes tab names containing spaces or special characters.
+
+### Files changed
+- `sheets/google_sheets.py` — `_get_worksheet()` renamed to `_get_spreadsheet()`, added `_range()` helper
 
 ---
 
 ## P5 — No git credential helper in WSL environment
 
-**Date:** Session 1
+**Date:** Session 1 (ongoing)
 **Status:** Unresolved (workaround)
 
-**Symptoms:** `git push` fails with "could not read Username for 'https://github.com': No such device or address."
+### Problem
+When trying to `git push` from the coding environment (WSL bash), it fails with:
+```
+fatal: could not read Username for 'https://github.com': No such device or address
+```
 
-**Root Cause:** The code editor environment (WSL) doesn't have interactive git credentials configured. No GitHub token in environment variables.
+### What was attempted
+1. Switched remote URL to SSH (`git@github.com` style) — failed due to no SSH key or host key verification
+2. Checked for GitHub tokens in environment variables — none found
+3. Checked git config — user.name and user.email are set, but no credential helper
+4. Tried setting `GIT_SSH_COMMAND` to skip host key checking — still failed
 
-**Workaround:** User must run `git push` from Windows Command Prompt or VS Code terminal on the host machine, where Windows git credential manager is available.
+### Root cause
+The coding environment runs in a container (WSL) without interactive terminal access. No SSH keys, no credential manager, and no GitHub token have been configured. The git remote is HTTPS which requires interactive password entry.
+
+### Solution
+Workaround only: user runs `git push` from Windows Command Prompt or VS Code terminal on the host machine, where the Windows Git Credential Manager has cached credentials from GitHub Desktop or VS Code login.
+
+### Files changed
+None
 
 ---
 
 ## P6 — Item names with digits fail to parse
 
-**Date:** Session 1
+**Date:** Session 1 (v1 era)
 **Status:** Resolved
 
-**Symptoms:** Items like "USB-C 3m cable" or "5mm screw" cannot be entered because the parser rejects digits in item names.
+### Problem
+Users couldn't enter items with numbers in their names. "USB-C 3m cable" would parse as just "USB-C" with quantity 3. "5mm screw" wouldn't parse at all.
 
-**Root Cause:** Regex `QTY_PATTERN` used `[a-zA-Z][a-zA-Z\s-]*` which explicitly excluded digits.
+### What was attempted
+1. Tested the regex pattern against sample inputs — confirmed digits were excluded
+2. Reviewed the regex: `(?P<item>[a-zA-Z][a-zA-Z\s-]*)` — `a-zA-Z` explicitly excludes digits
 
-**Fix:** Changed character class to `[a-zA-Z0-9\s.-]` to allow digits, periods, and hyphens in item names.
+### Root cause
+The regex character class `[a-zA-Z\s-]` was designed for English words only and didn't account for technical product names that include digits.
 
-**Files changed:** `parser/extractor.py` (file later removed in v2)
+### Solution
+Changed the character class to `[a-zA-Z0-9\s.-]` to allow digits, periods, and hyphens within item names.
+
+### Files changed
+- `parser/extractor.py` (this file was later removed in the v2 rewrite)
 
 ---
 
 ## P7 — Railway deploy shows old code despite git push
 
-**Date:** Session 2
+**Date:** Session 2 (current)
 **Status:** Unresolved
 
-**Symptoms:** After `git push` (confirmed commits `504ea6c` and `de879f2` on `origin/main`), Railway continues running old v1 code. Old commands (`/diag`, `/inv`) still work. New v2 commands (`/add`, `/stock`, etc.) do not appear.
+### Problem
+After `git push` (confirming commits `504ea6c` and `de879f2` on `origin/main`), Railway continued running the old v1 code. Old commands (`/diag`, `/inv`) still worked. The build log showed v2 dependencies being installed, but Discord never showed the new commands.
 
-**Root Cause:** Unknown. Multiple attempts failed:
-- Railway "Redeploy" button — runs old cached build
-- Railway "New Deployment" → "Deploy from GitHub" — still runs old code
-- Railway "Disconnect and reconnect repo" — still runs old code
-- Pushing empty commit to trigger webhook — still runs old code
-- Build logs show v2 dependencies installed correctly → image is BUILT with new code
-- Deploy logs show "synced commands" → container IS running new code
-- But Discord client never shows the new commands
+### What was attempted
 
-**Hypothesis A:** The `tree.sync()` call returns success but sends an empty command list, clearing the guild's commands. This would mean the command tree was empty at sync time despite `handlers.py` importing successfully. Could be a race condition in discord.py 2.7.1.
+**Attempt 1 — Push and Redeploy:**
+- Ran `git push` from Windows — confirmed commits on GitHub
+- Clicked "Redeploy" on Railway — old code still running
+- Result: Failed
 
-**Hypothesis B:** Discord's client-side command cache is stale and not refreshing. Server-side commands ARE registered, but the desktop client doesn't show them. Web Discord or mobile might work.
+**Attempt 2 — New Deployment from GitHub:**
+- Clicked "New Deployment" → "Deploy from GitHub" → selected `main`
+- Build log showed correct v2 dependencies (no `openai`, no `gspread`)
+- Deploy log showed "synced commands to guild"
+- But Discord still showed old commands
+- Result: Failed
 
-**Hypothesis C:** Another instance of the bot (old container) is still running and its `on_ready` sync overwrites the new commands. This would require Railway to have two containers running simultaneously.
+**Attempt 3 — Railway logs analysis:**
+- Build logs confirmed v2 dependencies: `discord.py-2.7.1`, `google-auth-2.55.0`, no `openai`
+- Deploy logs confirmed: "bot ready, syncing commands..., synced commands to guild 1517681446259523594"
+- The bot IS running v2 code, but commands don't appear in Discord
+- Result: Confusing — code is correct, deployment succeeds, sync succeeds, but UI doesn't change
 
-**Attempted fixes that didn't work:**
-- Disconnect/reconnect GitHub repo in Railway Settings
-- Click "New Deployment" instead of "Redeploy"
-- Empty commit (`git commit --allow-empty -m "force rebuild"`)
-- Full Discord client restart
+**Attempt 4 — Empty commit to force webhook:**
+- Ran `git commit --allow-empty -m "force rebuild"` and `git push`
+- Railway created a new deployment
+- Commands still not showing
+- Result: Failed
 
-**Next steps planned (not yet attempted):**
-- Add logging to capture number of commands synced
-- Add global sync fallback if guild sync returns 0
-- Add `/version` command to verify deployed commit
+**Attempt 5 — Disconnect and reconnect GitHub repo:**
+- Railway Settings → Disconnect Repository → Connect GitHub Repo
+- Railway created a fresh build
+- Commands still not showing
+- Result: Failed
 
-**Relevant files:**
+**Attempt 6 — Discord client restart:**
+- User restarted Discord desktop app completely
+- Commands still not showing
+- Result: Failed
+
+**Attempt 7 — Type command without autocomplete:**
+- User typed `/add BPP09 3 maple 5 cherry` and sent it
+- "Nothing" happened — no response, no error
+- Suggests the command isn't registered on Discord's server side, not just a client cache issue
+- Result: Confirmed the problem is server-side
+
+### Current hypotheses
+
+**Hypothesis A (most likely):** `tree.sync()` returns success but sends an empty command list, which DISCORD interprets as "clear all guild commands." This would happen if the `@tree.command()` decorators in `handlers.py` didn't register anything on the `tree` object by the time `on_ready` fires. The code logs "synced commands" after the `await` completes, but doesn't log HOW MANY commands were synced.
+
+Why this could happen:
+- Python import order issue: if `handlers.py` is imported but its `@tree.command()` decorators don't fire somehow
+- Race condition in `discord.py` 2.7.1 where `tree.sync()` is called before commands finish registering
+- The `tree` object imported in `handlers.py` (`from bot.discord_bot import tree`) might not be the same instance as the one in `discord_bot.py`
+
+**Hypothesis B:** Discord API accepted the sync request but silently ignored it due to rate limiting or validation issues. The bot's code doesn't check the return value of `tree.sync()` — it only logs that it completed, not what it returned.
+
+**Hypothesis C:** Another bot instance (old container) is still running on Railway and its `on_ready` fires after the new one, overwriting the commands. This would require two containers running simultaneously, which Railway shouldn't allow.
+
+### Planned solution (not yet implemented)
+
+Steps to diagnose and fix:
+1. Log the return value of `tree.sync()` — how many commands, what are their names
+2. Add a global sync fallback if guild sync returns less than expected
+3. Add a `/version` command that responds with the current git commit hash
+
+### Files relevant
 - `bot/discord_bot.py` — `on_ready()` sync logic
 - `bot/handlers.py` — command registration via `@tree.command()`
 - `main.py` — import order
@@ -136,72 +257,82 @@ A chronological log of every issue encountered, its cause, and how it was resolv
 
 ## P8 — Audit tab headers write to wrong sheetId
 
-**Date:** Session 2 (fixed before deploy)
+**Date:** Session 2 (fixed before deployment, never reached production)
 **Status:** Resolved
 
-**Symptoms:** `_ensure_audit_headers()` used hardcoded `sheetId: 0` when writing header rows via `batchUpdate`. Sheet ID 0 is always the FIRST tab (Inventory), not the Audit Log tab.
+### Problem
+`_ensure_audit_headers()` used hardcoded `sheetId: 0` when writing header rows via the `batchUpdate` API. Sheet ID 0 is always the first tab (Inventory in the v2 layout), not the Audit Log tab. This would corrupt the Inventory tab's first row.
 
-**Root Cause:** Hardcoded sheet ID instead of using the correct one from `_tab_info()`.
+### What was attempted
+1. Reviewed the `batchUpdate` API documentation — confirmed `sheetId` is required and must match the target tab
+2. Checked `_tab_info()` — it correctly returns the numeric `sheetId` for any named tab
+3. The fix was applied before the v2 code was deployed, so this never caused a live issue
 
-**Fix:** Updated `_ensure_audit_headers()` to accept `sheet_id` parameter. Updated `log_entry()` to pass the correct ID from `_tab_info("Audit Log")`.
+### Root cause
+The `_ensure_audit_headers()` function was written assuming the first tab (index 0) was always the audit tab. When the sheet layout changed to have Inventory as tab 1 and Audit Log as tab 2, the hardcoded `0` became wrong.
 
-**Files changed:** `sheets/google_sheets.py`
+### Solution
+Updated `_ensure_audit_headers()` to accept a `sheet_id` parameter. `log_entry()` now retrieves the correct sheetId from `_tab_info("Audit Log")` and passes it through.
+
+### Files changed
+- `sheets/google_sheets.py` — `_ensure_audit_headers()` signature and body
 
 ---
 
 ## P9 — Audit Log tab not auto-created
 
-**Date:** Session 2 (fixed before deploy)
+**Date:** Session 2 (fixed before deployment)
 **Status:** Resolved
 
-**Symptoms:** User creates the sheet with only an "Inventory" tab. The bot tries to write to "Audit Log" tab which doesn't exist, causing errors.
+### Problem
+If a user created a new sheet with only the default "Sheet1" tab (or renamed it to "Inventory"), the bot would crash when trying to write to an "Audit Log" tab that didn't exist.
 
-**Root Cause:** `_tab_info("Audit Log")` raised `RuntimeError` when tab didn't exist.
+### What was attempted
+1. Checked if `_tab_info()` could auto-create tabs — it couldn't, it only searched
+2. Considered requiring users to manually create both tabs — user-hostile
 
-**Fix:** Added `auto_create=True` parameter to `_tab_info()`. When set, the function creates the tab via `batchUpdate` before returning. `log_entry()` and `get_log()` both use `auto_create=True`.
+### Root cause
+`_tab_info()` raised `RuntimeError` when the requested tab name wasn't found. No fallback.
 
-**Files changed:** `sheets/google_sheets.py`
+### Solution
+Added `auto_create=False` parameter to `_tab_info()`. When `auto_create=True`, it sends a `batchUpdate` request with `addSheet` to create the tab before returning. Both `log_entry()` and `get_log()` pass `auto_create=True` for "Audit Log".
+
+### Files changed
+- `sheets/google_sheets.py` — `_tab_info()` signature and body
 
 ---
 
 ## P10 — Parser regex captures too much in greedy mode
 
-**Date:** Session 2 (fixed before deploy)
+**Date:** Session 2 (fixed before deployment)
 **Status:** Resolved
 
-**Symptoms:** Input `"3 maple 5 cherry"` returned `[("maple 5 cherry", 3)]` — the second quantity and variant were consumed as part of the first variant name.
+### Problem
+The input `"/add BPP09 3 maple 5 cherry"` parsed as `[("maple 5 cherry", 3)]` instead of `[("maple", 3), ("cherry", 5)]`. The second quantity and variant name were consumed as part of the first variant name.
 
-**Root Cause:** The `var1` capture group used `[a-zA-Z0-9\s/&-]*` which included digits. The greedy quantifier `*` consumed everything including "5 cherry".
+### What was attempted
+1. Tested the regex against all intended input formats
+2. Discovered the character class `[a-zA-Z0-9\s/&-]*` was too permissive — digits should not be part of variant names
+3. The greedy quantifier `*` was consuming everything including digits
 
-**Fix:** Removed `0-9` from the character class. Variant names are now limited to `[a-zA-Z][a-zA-Z\s/&-]*` (letters, spaces, slashes, hyphens, ampersands — no digits).
+### Root cause
+The variant name capture group included `0-9` in its allowed character set. When the regex matched `"3 maple 5 cherry"`, the `var1` group greedily consumed `"maple 5 cherry"` because digits were allowed in variant names.
 
-**Files changed:** `parser/pairs.py`
+### Solution
+Removed `0-9` from the variant name character class. Variant names are now limited to letters, spaces, slashes, hyphens, and ampersands: `[a-zA-Z][a-zA-Z\s/&-]*`. Digits in the middle of a variant name will stop the greedy match, allowing the next quantity to be matched separately.
 
-**Tested formats (all pass):**
+### Files changed
+- `parser/pairs.py`
+
+### Verified input formats
 ```
-3 maple 5 cherry            → [("maple", 3), ("cherry", 5)]
-maple 3 cherry 5            → [("maple", 3), ("cherry", 5)]
-maple:3 cherry:5            → [("maple", 3), ("cherry", 5)]
-3x maple 5x cherry          → [("maple", 3), ("cherry", 5)]
-3 maple, 5 cherry           → [("maple", 3), ("cherry", 5)]
-3 maple and 5 cherry        → [("maple", 3), ("cherry", 5)]
-maple:3, 5 cherry and 2x OAK → [("maple", 3), ("cherry", 5), ("OAK", 2)]
-3 hard maple 5 cherry       → [("hard maple", 3), ("cherry", 5)]
+Input                              Output
+3 maple 5 cherry            →  [("maple", 3), ("cherry", 5)]
+maple 3 cherry 5            →  [("maple", 3), ("cherry", 5)]
+maple:3 cherry:5            →  [("maple", 3), ("cherry", 5)]
+3x maple 5x cherry          →  [("maple", 3), ("cherry", 5)]
+3 maple, 5 cherry           →  [("maple", 3), ("cherry", 5)]
+3 maple and 5 cherry        →  [("maple", 3), ("cherry", 5)]
+maple:3, 5 cherry and 2x OAK →  [("maple", 3), ("cherry", 5), ("OAK", 2)]
+3 hard maple 5 cherry       →  [("hard maple", 3), ("cherry", 5)]
 ```
-
----
-
-## Legacy Problem Summary
-
-| ID | Problem | Status | Fix |
-|----|---------|--------|-----|
-| P1 | gspread returns HTML | Resolved | Direct `requests` API calls |
-| P2 | Credentials parse failure | Resolved | Quote stripping + lazy loading |
-| P3 | Full URL as SHEET_ID | Resolved | Regex extraction |
-| P4 | Wrong sheet tab name | Resolved | `data["sheets"][0]["properties"]["title"]` |
-| P5 | No git auth in WSL | Workaround | Push from Windows |
-| P6 | Digits in item names | Resolved | Regex char class fix |
-| P7 | Railway deploys old code | **UNRESOLVED** | See hypothesis A/B/C above |
-| P8 | Wrong sheetId in headers | Resolved | Pass correct sheet_id |
-| P9 | Audit tab not created | Resolved | Auto-create option |
-| P10 | Greedy parser regex | Resolved | Remove digits from variant char class |
