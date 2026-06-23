@@ -135,3 +135,84 @@ In Railway variables, set:
 - `AI_MODEL` = the model name you want
 
 Then in Discord, type `/toggle-ai` to enable it.
+
+---
+
+## Command Reference
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `/inv` | Add items to inventory | `/inv 5 laptops and 3 chairs` |
+| `/categories` | List all categories and subcategories | `/categories` |
+| `/add-cat` | Add a custom category | `/add-cat Beverages soda, juice, water` |
+| `/add-subcat` | Add a subcategory to an existing category | `/add-subcat Electronics Peripherals mouse, keyboard` |
+| `/remove-cat` | Remove a custom category | `/remove-cat Beverages` |
+| `/remove-subcat` | Remove a subcategory | `/remove-subcat Electronics Peripherals` |
+| `/sync-categories` | Write all categories to the "Categories" sheet tab | `/sync-categories` |
+| `/recent` | Show recent entries (add a number for more) | `/recent 10` |
+| `/sheet` | Get the Google Sheet link | `/sheet` |
+| `/toggle-ai` | Enable/disable AI categorization | `/toggle-ai` |
+| `/diag` | Test connection to Google Sheets | `/diag` |
+
+---
+
+## Replication Guide
+
+Use this section to duplicate the bot for another business.
+
+### What to change per business
+
+1. **Fork the repo** on GitHub (or copy the folder)
+2. **Create a new Google Sheet** and get its `SHEET_ID`
+3. **Create a new Discord bot** at https://discord.com/developers/applications and get its `DISCORD_TOKEN`
+4. **Create a new Google Cloud service account** (or reuse the same one and share the new sheet with it)
+5. **Deploy on Railway** — create a new project and add the three variables:
+   - `DISCORD_TOKEN`
+   - `GOOGLE_SERVICE_ACCOUNT_JSON`
+   - `SHEET_ID`
+
+### What stays the same
+
+- The code itself (no changes needed unless you want custom categories)
+- The `DISCORD_TOKEN`, `SHEET_ID`, and `GOOGLE_SERVICE_ACCOUNT_JSON` are all per-deployment, stored in Railway variables
+
+### Customizing per business
+
+Edit these files if you need different defaults:
+
+| File | What to change |
+|------|---------------|
+| `parser/categories.py` | `DEFAULT_CATEGORIES` — top-level categories and `SUBCATEGORIES` — subcategories |
+| `sheets/schema.py` | `HEADERS` — column layout of the inventory sheet |
+
+### Business-specific inventory framework
+
+Each business can define its own category/subcategory structure:
+
+```python
+DEFAULT_CATEGORIES = {
+    "Restaurant": ["ingredient", "produce", "meat", "dairy"],
+    "Bar": ["spirit", "liquor", "beer", "wine", "mixer"],
+}
+SUBCATEGORIES = {
+    "Restaurant": {
+        "Produce": ["lettuce", "tomato", "onion"],
+        "Meat": ["chicken", "beef", "pork"],
+    },
+    "Bar": {
+        "Spirits": ["vodka", "whiskey", "gin"],
+        "Beer": ["lager", "ipa", "stout"],
+    },
+}
+```
+
+### Quick duplicate checklist
+
+```
+☐ Fork repo / copy code
+☐ Create new Google Sheet → share with service account
+☐ Create new Discord app → copy token
+☐ (Optional) Create new Google Cloud service account
+☐ Deploy on Railway with 3 variables
+☐ Test with `/diag` and `/inv 5 test chairs`
+```

@@ -14,7 +14,7 @@ IRREGULAR_PLURALS = {
 QTY_PATTERN = re.compile(
     r"(?P<qty>\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)"
     r"(?:\s+(?:box|boxes|case|cases|pack|packs|bottle|bottles|can|cans|crate|crates)\s+of)?"
-    r"\s+(?P<item>[a-zA-Z][a-zA-Z\s-]*)",
+    r"\s+(?P<item>[a-zA-Z][a-zA-Z0-9\s.-]*)",
     re.IGNORECASE,
 )
 

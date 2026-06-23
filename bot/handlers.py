@@ -5,11 +5,12 @@ import discord
 from bot.discord_bot import tree
 from config import SHEET_ID
 from parser.categorizer import categorize_items
-from parser.categories import DEFAULT_CATEGORIES
+from parser.categories import DEFAULT_CATEGORIES, SUBCATEGORIES, all_keywords, all_subcategories
 from parser.extractor import extract_items
-from sheets.google_sheets import append_entry, get_recent
+from sheets.google_sheets import append_entry, get_recent, sync_categories_tab
 
 custom_categories: dict[str, list[str]] = {}
+custom_subcategories: dict[str, dict[str, list[str]]] = {}
 ai_enabled = False
 
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
@@ -25,12 +26,13 @@ async def inv(interaction: discord.Interaction, items: str):
             await interaction.followup.send("Couldn't parse any items. Try: `/inv 5 laptops and 3 chairs`")
             return
 
-        categorized = categorize_items(parsed, use_ai=ai_enabled, custom_categories=custom_categories)
+        categorized = categorize_items(parsed, use_ai=ai_enabled, custom_categories=custom_categories, custom_subcategories=custom_subcategories)
 
         lines = []
-        for item_name, category, quantity in categorized:
-            append_entry(item_name, category, quantity)
-            lines.append(f"**{item_name}** — {quantity} ({category})")
+        for item_name, category, subcategory, quantity in categorized:
+            append_entry(item_name, category, quantity, subcategory=subcategory)
+            cat_str = f"{category} > {subcategory}" if subcategory else category
+            lines.append(f"**{item_name}** — {quantity} ({cat_str})")
 
         embed = discord.Embed(
             title="Inventory Added",
@@ -41,17 +43,33 @@ async def inv(interaction: discord.Interaction, items: str):
         embed.set_footer(text=f"View sheet: {SHEET_URL}")
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        msg = str(e)[:500] if "APIError" in type(e).__name__ else str(e)
-        await interaction.followup.send(f"Error: {msg}\n\nCheck that SHEET_ID and Google credentials are correct in Railway variables.")
+        msg = str(e)[:500]
+        await interaction.followup.send(f"Error: {msg}")
 
 
-@tree.command(name="categories", description="List all categories and their keywords")
+@tree.command(name="categories", description="List all categories and subcategories")
 async def categories(interaction: discord.Interaction):
-    all_cats = {**DEFAULT_CATEGORIES, **custom_categories}
+    all_cats = all_keywords(custom_categories)
+    all_subs = all_subcategories(custom_subcategories)
     lines = []
-    for cat, keywords in sorted(all_cats.items()):
-        kw = ", ".join(sorted(set(keywords)))
-        lines.append(f"**{cat}**: {kw}")
+    for cat in sorted(all_cats):
+        subs = all_subs.get(cat, {})
+        if subs:
+            top_row = f"**{cat}**"
+            for subcat in sorted(subs):
+                kw = ", ".join(sorted(set(subs[subcat])))
+                top_row += f"\n  └ {subcat}: {kw}"
+            lines.append(top_row)
+            used_kw = set()
+            for lst in subs.values():
+                for k in lst:
+                    used_kw.add(k)
+            remaining = [k for k in all_cats[cat] if k not in used_kw]
+            if remaining:
+                lines[-1] += f"\n  ─ (general): {', '.join(sorted(set(remaining)))}"
+        else:
+            kw = ", ".join(sorted(set(all_cats[cat])))
+            lines.append(f"**{cat}**: {kw}")
 
     embed = discord.Embed(
         title="Inventory Categories",
@@ -70,6 +88,49 @@ async def add_category(interaction: discord.Interaction, name: str, keywords: st
     )
 
 
+@tree.command(name="add-subcat", description="Add a subcategory to an existing category")
+async def add_subcategory(interaction: discord.Interaction, category: str, name: str, keywords: str):
+    if category not in custom_subcategories:
+        custom_subcategories[category] = {}
+    custom_subcategories[category][name] = [kw.strip().lower() for kw in keywords.split(",")]
+    await interaction.response.send_message(
+        f"Subcategory **{name}** added to **{category}** with keywords: {keywords}",
+        ephemeral=True,
+    )
+
+
+@tree.command(name="remove-cat", description="Remove a custom category")
+async def remove_category(interaction: discord.Interaction, name: str):
+    if name in custom_categories:
+        del custom_categories[name]
+        custom_subcategories.pop(name, None)
+        await interaction.response.send_message(f"Category **{name}** removed.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"Category **{name}** not found.", ephemeral=True)
+
+
+@tree.command(name="remove-subcat", description="Remove a subcategory")
+async def remove_subcategory(interaction: discord.Interaction, category: str, name: str):
+    subs = custom_subcategories.get(category)
+    if subs and name in subs:
+        del subs[name]
+        if not subs:
+            del custom_subcategories[category]
+        await interaction.response.send_message(f"Subcategory **{name}** removed from **{category}**.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"Subcategory **{name}** not found under **{category}**.", ephemeral=True)
+
+
+@tree.command(name="sync-categories", description="Write all categories to the Categories sheet tab")
+async def sync_categories(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        sync_categories_tab(all_keywords(custom_categories), all_subcategories(custom_subcategories))
+        await interaction.followup.send("Categories synced to the **Categories** sheet tab.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"Sync failed: {e}", ephemeral=True)
+
+
 @tree.command(name="sheet", description="Get the Google Sheet link")
 async def sheet(interaction: discord.Interaction):
     await interaction.response.send_message(SHEET_URL)
@@ -85,8 +146,10 @@ async def recent(interaction: discord.Interaction, n: int = 5):
 
         lines = []
         for row in reversed(rows):
-            padded = row + [""] * (6 - len(row))
-            lines.append(f"**{padded[0]}** | {padded[2]}x {padded[1]} — {padded[3]}")
+            padded = row + [""] * (7 - len(row))
+            item, cat, subcat, qty, date_ = padded[0], padded[1], padded[2], padded[3], padded[4]
+            cat_str = f"{cat} > {subcat}" if subcat else cat
+            lines.append(f"**{item}** | {qty}x {cat_str} — {date_}")
 
         embed = discord.Embed(
             title=f"Last {len(rows)} Entries",
