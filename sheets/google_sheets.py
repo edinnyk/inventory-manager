@@ -7,7 +7,7 @@ from google.auth.transport.requests import Request as AuthRequest
 from google.oauth2.service_account import Credentials
 
 from config import SHEET_ID, get_google_credentials
-from sheets.schema import HEADERS
+from sheets.schema import HEADERS, NON_VARIANT_HEADERS
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,10 @@ def _col_letter(n: int) -> str:
         n, r = divmod(n - 1, 26)
         s = chr(65 + r) + s
     return s
+
+
+def _cap(s: str) -> str:
+    return s.strip().upper()
 
 
 def _tab_info(tab_name: str, auto_create: bool = False):
@@ -91,6 +95,18 @@ def _last_data_row(session, sheet_name, column="B"):
         if values[i] and str(values[i][0]).strip():
             return i + 2
     return 2
+
+
+def _variant_headers(session, sheet_name):
+    range_ = _range(sheet_name, "A1:ZZ1")
+    resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
+    headers = resp.json().get("values", [[]])[0]
+    variants = []
+    for i, h in enumerate(headers):
+        name = str(h).strip()
+        if name and name.lower() not in NON_VARIANT_HEADERS:
+            variants.append((name, _col_letter(i + 1)))
+    return variants
 
 
 def log_entry(item: str, delta: str, notes: str):
@@ -145,24 +161,15 @@ def find_product_row(product: str) -> int | None:
 
 def find_variant_col(variant: str) -> str | None:
     session, sheet_name, _ = _tab_info("Inventory")
-    range_ = _range(sheet_name, "E1:ZZ1")
-    resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
-    if resp.status_code != 200:
-        raise RuntimeError(f"read failed ({resp.status_code}): {resp.text[:300]}")
-    headers = resp.json().get("values", [[]])[0]
-    for i, val in enumerate(headers):
-        if str(val).strip().lower() == variant.lower():
-            return _col_letter(5 + i)
+    for name, col in _variant_headers(session, sheet_name):
+        if name.lower() == variant.lower():
+            return col
     return None
 
 
 def list_variants() -> list[str]:
     session, sheet_name, _ = _tab_info("Inventory")
-    range_ = _range(sheet_name, "E1:ZZ1")
-    resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
-    if resp.status_code != 200:
-        raise RuntimeError(f"read failed ({resp.status_code}): {resp.text[:300]}")
-    return [str(v).strip() for v in resp.json().get("values", [[]])[0] if str(v).strip()]
+    return [name for name, _ in _variant_headers(session, sheet_name)]
 
 
 def matrix_read_cell(product: str, variant: str) -> int:
@@ -205,28 +212,47 @@ def matrix_get(product: str) -> dict[str, int]:
     if row is None:
         raise ValueError(f"Product '{product}' not found")
     session, sheet_name, _ = _tab_info("Inventory")
-    range_ = _range(sheet_name, f"E{row}:ZZ{row}")
+    variants = _variant_headers(session, sheet_name)
+    if not variants:
+        return {}
+    first_col = variants[0][1]
+    last_col = variants[-1][1]
+    range_ = _range(sheet_name, f"{first_col}{row}:{last_col}{row}")
     resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
     values = resp.json().get("values", [[]])[0]
-    variants = list_variants()
     result = {}
-    for i, var in enumerate(variants):
+    for i, (name, _) in enumerate(variants):
         if i < len(values):
             raw = values[i]
             if raw and str(raw).strip():
-                result[var] = int(float(str(raw).replace(",", "").replace("$", "")))
+                result[name] = int(float(str(raw).replace(",", "").replace("$", "")))
             else:
-                result[var] = 0
+                result[name] = 0
         else:
-            result[var] = 0
+            result[name] = 0
     return result
+
+
+def product_info(product: str) -> dict:
+    row = find_product_row(product)
+    if row is None:
+        raise ValueError(f"Product '{product}' not found")
+    session, sheet_name, _ = _tab_info("Inventory")
+    range_ = _range(sheet_name, f"B{row}:D{row}")
+    resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
+    vals = resp.json().get("values", [[None, None, None]])[0]
+    return {
+        "product": str(vals[0]).strip() if len(vals) > 0 and vals[0] else "",
+        "size": str(vals[1]).strip() if len(vals) > 1 and vals[1] else "",
+        "carcass": str(vals[2]).strip() if len(vals) > 2 and vals[2] else "",
+    }
 
 
 def add_product_row(product: str, size: str = ""):
     session, sheet_name, _ = _tab_info("Inventory")
     next_row = _last_data_row(session, sheet_name, "B")
     range_ = _range(sheet_name, f"B{next_row}:C{next_row}")
-    body = {"values": [[product, size]]}
+    body = {"values": [[_cap(product), _cap(size)]]}
     resp = session.put(
         f"{API_BASE}/{SHEET_ID}/values/{range_}",
         params={"valueInputOption": "USER_ENTERED"},
@@ -234,21 +260,28 @@ def add_product_row(product: str, size: str = ""):
     )
     if resp.status_code != 200:
         raise RuntimeError(f"add product failed ({resp.status_code}): {resp.text[:300]}")
-    logger.info("added product row %s at row %d", product, next_row)
+    logger.info("added product row %s at row %d", _cap(product), next_row)
 
 
 def add_variant_column(name: str):
     session, sheet_name, _ = _tab_info("Inventory")
-    range_ = _range(sheet_name, "E1:ZZ1")
+    variants = _variant_headers(session, sheet_name)
+    capped = _cap(name)
+    for vname, _ in variants:
+        if vname.lower() == capped.lower():
+            raise ValueError(f"Variant '{capped}' already exists")
+    # Find the last non-empty column in row 1
+    range_ = _range(sheet_name, "A1:ZZ1")
     resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
-    existing = resp.json().get("values", [[]])[0]
-    for val in existing:
-        if str(val).strip().lower() == name.lower():
-            raise ValueError(f"Variant '{name}' already exists")
-    next_col = 5 + len(existing)
+    headers = resp.json().get("values", [[]])[0]
+    last_non_empty = 0
+    for i, h in enumerate(headers):
+        if str(h).strip():
+            last_non_empty = i + 1
+    next_col = last_non_empty + 1
     col_letter = _col_letter(next_col)
     range_ = _range(sheet_name, f"{col_letter}1")
-    body = {"values": [[name]]}
+    body = {"values": [[capped]]}
     resp = session.put(
         f"{API_BASE}/{SHEET_ID}/values/{range_}",
         params={"valueInputOption": "USER_ENTERED"},
@@ -256,7 +289,7 @@ def add_variant_column(name: str):
     )
     if resp.status_code != 200:
         raise RuntimeError(f"add variant failed ({resp.status_code}): {resp.text[:300]}")
-    logger.info("added variant column %s at %s", name, col_letter)
+    logger.info("added variant column %s at %s", capped, col_letter)
 
 
 def rename_variant_column(old: str, new: str):
@@ -265,7 +298,7 @@ def rename_variant_column(old: str, new: str):
         raise ValueError(f"Variant '{old}' not found")
     session, sheet_name, _ = _tab_info("Inventory")
     range_ = _range(sheet_name, f"{col}1")
-    body = {"values": [[new]]}
+    body = {"values": [[_cap(new)]]}
     resp = session.put(
         f"{API_BASE}/{SHEET_ID}/values/{range_}",
         params={"valueInputOption": "USER_ENTERED"},
@@ -273,4 +306,4 @@ def rename_variant_column(old: str, new: str):
     )
     if resp.status_code != 200:
         raise RuntimeError(f"rename variant failed ({resp.status_code}): {resp.text[:300]}")
-    logger.info("renamed variant %s to %s", old, new)
+    logger.info("renamed variant %s to %s", old, _cap(new))

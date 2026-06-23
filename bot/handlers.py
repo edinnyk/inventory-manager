@@ -15,6 +15,7 @@ from sheets.google_sheets import (
     matrix_get,
     matrix_read_cell,
     matrix_write_cell,
+    product_info,
     rename_variant_column,
 )
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
@@ -24,18 +25,18 @@ def _val(v: int) -> str:
     return f"+{v}" if v >= 0 else str(v)
 
 
-async def _process_pairs(
+async def _process_items(
     interaction: discord.Interaction,
     product: str,
-    pairs_text: str,
+    items_text: str,
     operation: str,
 ):
     await interaction.response.defer()
     try:
-        pairs = parse_pairs(pairs_text)
+        pairs = parse_pairs(items_text)
         if not pairs:
             await interaction.followup.send(
-                f"Couldn't parse any variant pairs from: `{pairs_text}`\n"
+                f"Couldn't parse any variant pairs from: `{items_text}`\n"
                 f"Try: `/add {product} 3 maple 5 cherry`"
             )
             return
@@ -100,31 +101,42 @@ async def _process_pairs(
 
 
 @tree.command(name="add", description="Add quantity to product variants")
-async def add(interaction: discord.Interaction, product: str, pairs: str):
-    await _process_pairs(interaction, product, pairs, "add")
+async def add(interaction: discord.Interaction, product: str, items: str):
+    await _process_items(interaction, product, items, "add")
 
 
 @tree.command(name="sub", description="Subtract quantity from product variants")
-async def sub(interaction: discord.Interaction, product: str, pairs: str):
-    await _process_pairs(interaction, product, pairs, "sub")
+async def sub(interaction: discord.Interaction, product: str, items: str):
+    await _process_items(interaction, product, items, "sub")
 
 
 @tree.command(name="set", description="Set exact quantity for product variants")
-async def set_(interaction: discord.Interaction, product: str, pairs: str):
-    await _process_pairs(interaction, product, pairs, "set")
+async def set_(interaction: discord.Interaction, product: str, items: str):
+    await _process_items(interaction, product, items, "set")
 
 
 @tree.command(name="stock", description="Show current totals for a product")
 async def stock(interaction: discord.Interaction, product: str):
     await interaction.response.defer()
     try:
+        info = product_info(product)
         data = matrix_get(product)
+
+        title = f"Stock — {info['product']}"
+        summary = []
+        if info["size"]:
+            summary.append(f"**Size**: {info['size']}")
+        if info["carcass"]:
+            summary.append(f"**Carcass**: {info['carcass']}")
+        if summary:
+            title += " | " + " | ".join(summary)
+
         if not data:
-            await interaction.followup.send(f"No variants found for **{product}**.")
+            await interaction.followup.send(f"No variants found for **{info['product']}**.")
             return
         lines = [f"**{var}**: {qty}" for var, qty in sorted(data.items())]
         embed = discord.Embed(
-            title=f"Stock — {product}",
+            title=title,
             description="\n".join(lines),
             color=discord.Color.blue(),
         )

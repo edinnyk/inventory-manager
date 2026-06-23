@@ -336,3 +336,165 @@ maple:3 cherry:5            →  [("maple", 3), ("cherry", 5)]
 maple:3, 5 cherry and 2x OAK →  [("maple", 3), ("cherry", 5), ("OAK", 2)]
 3 hard maple 5 cherry       →  [("hard maple", 3), ("cherry", 5)]
 ```
+
+---
+
+## P11 — Bot ignores CARCASS column, variants hardcoded to start at column E
+
+**Date:** Session 3
+**Status:** Resolved
+
+### Problem
+The sheet layout has:
+- Column D = CARCASS (a numeric property of the product, like "16" or "41")
+- Column E = spacer (empty, used for visual organization)
+- Column F+ = variants (MAPLE, CHERRY, etc.)
+
+But the bot's `find_variant_col()` starts searching from column E (`E1:ZZ1`), treating column E as the first variant. This means:
+1. The spacer column E gets treated as a variant if it has a header
+2. If Column E is empty, the bot stops there and never finds variants in column F+
+
+The user wants:
+- Column D recognized as CARCASS (bot reads and displays it, but doesn't treat it as a variant)
+- Column E always skipped (spacer)
+- Columns F+ treated as variants
+
+### What was attempted
+Implemented `_variant_headers()` that scans row 1 from A:ZZ1 and filters out
+known non-variant headers (SIZE, CARCASS, empty cells). All functions that
+need to find or enumerate variants now use this function instead of
+hardcoded column ranges.
+
+### Root cause
+Hardcoded variant start column in `find_variant_col()`, `list_variants()`, `matrix_get()`, and `add_variant_column()`:
+```python
+def find_variant_col(variant):
+    range_ = _range(sheet_name, "E1:ZZ1")  # ← hardcoded E
+```
+
+### Planned solution
+Make the variant column range auto-detectable:
+1. Read row 1 from column A onwards
+2. Skip known non-variant headers (CARCASS, SIZE, etc.)
+3. Skip empty cells (spacers)
+4. Everything else is a variant
+
+### Files relevant
+- `sheets/google_sheets.py` — `find_variant_col()`, `list_variants()`, `matrix_get()`, `add_variant_column()`
+
+---
+
+## P12 — No auto-capitalization when writing to sheet
+
+**Date:** Session 3
+**Status:** Resolved
+
+### Problem
+When a user types `/add BPP09 3 maple`, the word "maple" is written to the cell exactly as typed (lowercase). The user wants all values to be **capitalized** automatically (e.g., "MAPLE", "CHERRY") for consistent sheet appearance.
+
+This applies to:
+- Product names (column B)
+- Variant names (column headers, row 1)
+- Values written to cells
+
+### What was attempted
+Added `_cap()` helper (`s.strip().upper()`) and applied it in:
+
+- `add_product_row()` — caps product name and size
+- `add_variant_column()` — caps variant name
+- `rename_variant_column()` — caps the new name
+
+Note: `matrix_write_cell()` was NOT capped because cell values are
+quantities (integers), not names.
+
+### Root cause
+The code wrote values as-is — no transformation was applied.
+
+### Files relevant
+- `sheets/google_sheets.py` — `add_variant_column()`, `add_product_row()`, `matrix_write_cell()`
+- `bot/handlers.py` — all command handlers that pass user input
+
+---
+
+## P13 — `/add` command parameter "pairs" is confusing
+
+**Date:** Session 3
+**Status:** Resolved
+
+### Problem
+The `/add` command's second parameter is named `pairs`:
+```
+/add product: BPP09 pairs: 3 maple 5 cherry
+```
+Users don't understand what "pairs" means in this context. It's an internal
+term (quantity+variant pairs) that doesn't describe what the user should type.
+
+### What was attempted
+Renamed `pairs` → `items` in all three commands (`/add`, `/sub`, `/set`).
+The Discord prompt now shows:
+```
+/add product: BPP09 items: 3 maple 5 cherry
+```
+
+### Root cause
+Naming was technical rather than user-friendly.
+
+### Files relevant
+- `bot/handlers.py` — command definitions for `add`, `sub`, `set`
+
+---
+
+## P14 — Sheet layout is hardcoded, not adaptable to user organization
+
+**Date:** Session 3
+**Status:** Resolved (Phase 1 only)
+
+### Problem
+The bot assumes a specific column layout:
+- B = products
+- C = size
+- D = CARCASS (ignored)
+- E = spacer (currently treated as variant start)
+- F+ = variants
+
+But users may organize their sheet differently. The user wants the bot to
+**adapt** to whatever layout the user creates, rather than requiring the
+user to match the bot's expectations.
+
+### What was attempted
+Phase 1 implemented: smart variant detection via `_variant_headers()`.
+The function reads row 1, skips known non-variant headers ("SIZE", "CARCASS",
+empty cells), and returns only actual variant columns. All variant-related
+code now uses this function.
+
+Phase 2 (configurable `/layout` command) not implemented — not yet needed.
+
+### Root cause
+All column positions were hardcoded throughout `sheets/google_sheets.py`.
+
+### Planned solution
+Add a layout discovery system:
+
+**Phase 1 — Smart variant detection:**
+Read row 1, skip known non-variant headers ("SIZE", "CARCASS", ""), treat
+everything else as variants. This handles:
+- Different starting columns
+- Spacers between columns
+- Additional info columns the user may add
+
+**Phase 2 — Configurable via command:**
+Add a `/layout` command that lets the user define which columns map to
+which role:
+```
+/layout product: B size: C carcass: D spacer: E variant_start: F
+```
+Stored in memory (custom_categories-style dict) or in a config sheet tab.
+
+### Future considerations
+- Multi-line headers (row 1 = category group, row 2 = variant name)
+- Merged cells in header row
+- Dynamic column types (e.g., columns with "$" prefix are currency)
+
+### Files relevant
+- `sheets/google_sheets.py` — all functions that reference column positions
+- `bot/handlers.py` — new `/layout` command
