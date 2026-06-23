@@ -42,7 +42,7 @@ def _col_letter(n: int) -> str:
     return s
 
 
-def _tab_info(tab_name: str):
+def _tab_info(tab_name: str, auto_create: bool = False):
     session = _get_authorized_session()
     resp = session.get(f"{API_BASE}/{SHEET_ID}")
     if resp.status_code != 200:
@@ -51,10 +51,18 @@ def _tab_info(tab_name: str):
     for sheet in data["sheets"]:
         if sheet["properties"]["title"] == tab_name:
             return session, sheet["properties"]["title"], sheet["properties"]["sheetId"]
-    raise RuntimeError(f"Tab '{tab_name}' not found")
+    if not auto_create:
+        raise RuntimeError(f"Tab '{tab_name}' not found")
+    body = {"requests": [{"addSheet": {"properties": {"title": tab_name}}}]}
+    resp = session.post(f"{API_BASE}/{SHEET_ID}:batchUpdate", json=body)
+    if resp.status_code != 200:
+        raise RuntimeError(f"create tab failed ({resp.status_code}): {resp.text[:300]}")
+    new_id = resp.json()["replies"][0]["addSheet"]["properties"]["sheetId"]
+    logger.info("created tab '%s' (sheetId=%s)", tab_name, new_id)
+    return session, tab_name, new_id
 
 
-def _ensure_audit_headers(session, sheet_name):
+def _ensure_audit_headers(session, sheet_name, sheet_id):
     range_ = _range(sheet_name, "A1:D1")
     resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
     if resp.status_code == 200:
@@ -66,7 +74,7 @@ def _ensure_audit_headers(session, sheet_name):
             "updateCells": {
                 "rows": [{"values": [{"userEnteredValue": {"stringValue": h}} for h in HEADERS]}],
                 "fields": "userEnteredValue",
-                "start": {"sheetId": 0, "rowIndex": 0, "columnIndex": 0},
+                "start": {"sheetId": sheet_id, "rowIndex": 0, "columnIndex": 0},
             }
         }]
     }
@@ -86,8 +94,8 @@ def _last_data_row(session, sheet_name, column="B"):
 
 
 def log_entry(item: str, delta: str, notes: str):
-    session, sheet_name, _ = _tab_info("Audit Log")
-    _ensure_audit_headers(session, sheet_name)
+    session, sheet_name, sheet_id = _tab_info("Audit Log", auto_create=True)
+    _ensure_audit_headers(session, sheet_name, sheet_id)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     range_ = _range(sheet_name, "A:D")
     body = {"values": [[item, delta, now, notes]]}
@@ -101,7 +109,7 @@ def log_entry(item: str, delta: str, notes: str):
 
 
 def get_log(product: str, n: int = 5) -> list[dict]:
-    session, sheet_name, _ = _tab_info("Audit Log")
+    session, sheet_name, _ = _tab_info("Audit Log", auto_create=True)
     range_ = _range(sheet_name, "A:D")
     resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
     if resp.status_code != 200:
