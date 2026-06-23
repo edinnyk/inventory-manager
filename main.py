@@ -60,4 +60,5 @@ from bot.discord_bot import bot
 from config import DISCORD_TOKEN
 
 if __name__ == "__main__":
+    logger.info("starting bot...")
     bot.run(DISCORD_TOKEN)
