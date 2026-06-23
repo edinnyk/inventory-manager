@@ -1,2 +1,1 @@
-CATEGORIES_HEADERS = ["Category", "Subcategory", "Keywords"]
-HEADERS = ["Item", "Category", "Subcategory", "Quantity", "Date", "Notes", "Unit"]
+HEADERS = ["Item", "Quantity", "Date", "Notes"]

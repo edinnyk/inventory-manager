@@ -7,7 +7,6 @@ __pycache__/
 # Secrets — never commit these
 *.txt
 *.json
-!PLAN.txt
 !GIT_GUIDE.txt
 !SETUP.md
 !requirements.txt

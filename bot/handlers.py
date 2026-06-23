@@ -1,217 +1,200 @@
-from datetime import datetime
-
 import discord
 
 from bot.discord_bot import tree
 from config import SHEET_ID
-from parser.categorizer import categorize_items
-from parser.categories import DEFAULT_CATEGORIES, SUBCATEGORIES, all_keywords, all_subcategories
-from parser.extractor import extract_items
-from sheets.google_sheets import append_entry, get_recent, sync_categories_tab
-
-custom_categories: dict[str, list[str]] = {}
-custom_subcategories: dict[str, dict[str, list[str]]] = {}
-ai_enabled = False
-
+from parser.pairs import parse_pairs
+from sheets.google_sheets import (
+    add_product_row,
+    add_variant_column,
+    find_product_row,
+    get_log,
+    list_variants,
+    log_entry,
+    matrix_get,
+    matrix_read_cell,
+    matrix_write_cell,
+    rename_variant_column,
+)
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
 
 
-@tree.command(name="inv", description="Add items to inventory")
-async def inv(interaction: discord.Interaction, items: str):
-    await interaction.response.defer()
+def _val(v: int) -> str:
+    return f"+{v}" if v >= 0 else str(v)
 
+
+async def _process_pairs(
+    interaction: discord.Interaction,
+    product: str,
+    pairs_text: str,
+    operation: str,
+):
+    await interaction.response.defer()
     try:
-        parsed = extract_items(items)
-        if not parsed:
-            await interaction.followup.send("Couldn't parse any items. Try: `/inv 5 laptops and 3 chairs`")
+        pairs = parse_pairs(pairs_text)
+        if not pairs:
+            await interaction.followup.send(
+                f"Couldn't parse any variant pairs from: `{pairs_text}`\n"
+                f"Try: `/add {product} 3 maple 5 cherry`"
+            )
             return
 
-        categorized = categorize_items(parsed, use_ai=ai_enabled, custom_categories=custom_categories, custom_subcategories=custom_subcategories)
+        product_row = find_product_row(product)
+        if product_row is None:
+            await interaction.followup.send(
+                f"Product **{product}** not found.\n"
+                f"Use `/add-product {product}` to create it first."
+            )
+            return
+
+        variants = list_variants()
+        var_lookup = {v.lower(): v for v in variants}
 
         lines = []
-        for item_name, category, subcategory, quantity in categorized:
-            append_entry(item_name, category, quantity, subcategory=subcategory)
-            cat_str = f"{category} > {subcategory}" if subcategory else category
-            lines.append(f"**{item_name}** — {quantity} ({cat_str})")
+        errors = []
+        for var_name, qty in pairs:
+            actual = var_lookup.get(var_name.lower())
+            if actual is None:
+                errors.append(f"Variant **{var_name}** not found. Available: {', '.join(variants)}")
+                continue
+
+            current = matrix_read_cell(product, actual)
+
+            if operation == "add":
+                new_val = current + qty
+                delta = qty
+            elif operation == "sub":
+                new_val = max(0, current - qty)
+                delta = -(current - new_val)
+            elif operation == "set":
+                new_val = qty
+                delta = new_val - current
+
+            matrix_write_cell(product, actual, new_val)
+            lines.append(f"**{actual}**: {current} → {new_val} ({_val(delta)})")
+
+        if lines:
+            notes = "; ".join(lines)
+            total_delta = sum(
+                qty for var_name, qty in pairs
+                if var_lookup.get(var_name.lower()) is not None
+            )
+            log_entry(product, _val(total_delta), notes)
 
         embed = discord.Embed(
-            title="Inventory Added",
-            description="\n".join(lines),
+            title=f"{operation.title()} — {product}",
             color=discord.Color.green(),
-            timestamp=datetime.now(),
         )
-        embed.set_footer(text=f"View sheet: {SHEET_URL}")
+        if lines:
+            embed.description = "\n".join(lines)
+        if errors:
+            embed.add_field(name="Errors", value="\n".join(errors), inline=False)
+
+        await interaction.followup.send(embed=embed)
+
+    except ValueError as e:
+        await interaction.followup.send(str(e))
+    except Exception as e:
+        await interaction.followup.send(f"Error: {str(e)[:500]}")
+
+
+@tree.command(name="add", description="Add quantity to product variants")
+async def add(interaction: discord.Interaction, product: str, pairs: str):
+    await _process_pairs(interaction, product, pairs, "add")
+
+
+@tree.command(name="sub", description="Subtract quantity from product variants")
+async def sub(interaction: discord.Interaction, product: str, pairs: str):
+    await _process_pairs(interaction, product, pairs, "sub")
+
+
+@tree.command(name="set", description="Set exact quantity for product variants")
+async def set_(interaction: discord.Interaction, product: str, pairs: str):
+    await _process_pairs(interaction, product, pairs, "set")
+
+
+@tree.command(name="stock", description="Show current totals for a product")
+async def stock(interaction: discord.Interaction, product: str):
+    await interaction.response.defer()
+    try:
+        data = matrix_get(product)
+        if not data:
+            await interaction.followup.send(f"No variants found for **{product}**.")
+            return
+        lines = [f"**{var}**: {qty}" for var, qty in sorted(data.items())]
+        embed = discord.Embed(
+            title=f"Stock — {product}",
+            description="\n".join(lines),
+            color=discord.Color.blue(),
+        )
+        embed.set_footer(text=SHEET_URL)
+        await interaction.followup.send(embed=embed)
+    except ValueError as e:
+        await interaction.followup.send(str(e))
+    except Exception as e:
+        await interaction.followup.send(f"Error: {str(e)[:500]}")
+
+
+@tree.command(name="log", description="Show recent audit log entries for a product")
+async def log(interaction: discord.Interaction, product: str, n: int = 5):
+    await interaction.response.defer()
+    try:
+        entries = get_log(product, n)
+        if not entries:
+            await interaction.followup.send(f"No log entries for **{product}**.")
+            return
+        lines = [
+            f"**{e['date']}** | {e['delta']} — {e['notes']}"
+            for e in entries
+        ]
+        embed = discord.Embed(
+            title=f"Log — {product} (last {len(entries)})",
+            description="\n".join(lines),
+            color=discord.Color.purple(),
+        )
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        msg = str(e)[:500]
-        await interaction.followup.send(f"Error: {msg}")
+        await interaction.followup.send(f"Error: {str(e)[:500]}")
 
 
-@tree.command(name="categories", description="List all categories and subcategories")
-async def categories(interaction: discord.Interaction):
-    all_cats = all_keywords(custom_categories)
-    all_subs = all_subcategories(custom_subcategories)
-    lines = []
-    for cat in sorted(all_cats):
-        subs = all_subs.get(cat, {})
-        if subs:
-            top_row = f"**{cat}**"
-            for subcat in sorted(subs):
-                kw = ", ".join(sorted(set(subs[subcat])))
-                top_row += f"\n  └ {subcat}: {kw}"
-            lines.append(top_row)
-            used_kw = set()
-            for lst in subs.values():
-                for k in lst:
-                    used_kw.add(k)
-            remaining = [k for k in all_cats[cat] if k not in used_kw]
-            if remaining:
-                lines[-1] += f"\n  ─ (general): {', '.join(sorted(set(remaining)))}"
-        else:
-            kw = ", ".join(sorted(set(all_cats[cat])))
-            lines.append(f"**{cat}**: {kw}")
-
-    embed = discord.Embed(
-        title="Inventory Categories",
-        description="\n".join(lines),
-        color=discord.Color.blue(),
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-@tree.command(name="add-cat", description="Add a custom category with keywords")
-async def add_category(interaction: discord.Interaction, name: str, keywords: str):
-    custom_categories[name] = [kw.strip().lower() for kw in keywords.split(",")]
-    await interaction.response.send_message(
-        f"Category **{name}** added with keywords: {keywords}",
-        ephemeral=True,
-    )
-
-
-@tree.command(name="add-subcat", description="Add a subcategory to an existing category")
-async def add_subcategory(interaction: discord.Interaction, category: str, name: str, keywords: str):
-    if category not in custom_subcategories:
-        custom_subcategories[category] = {}
-    custom_subcategories[category][name] = [kw.strip().lower() for kw in keywords.split(",")]
-    await interaction.response.send_message(
-        f"Subcategory **{name}** added to **{category}** with keywords: {keywords}",
-        ephemeral=True,
-    )
-
-
-@tree.command(name="remove-cat", description="Remove a custom category")
-async def remove_category(interaction: discord.Interaction, name: str):
-    if name in custom_categories:
-        del custom_categories[name]
-        custom_subcategories.pop(name, None)
-        await interaction.response.send_message(f"Category **{name}** removed.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"Category **{name}** not found.", ephemeral=True)
-
-
-@tree.command(name="remove-subcat", description="Remove a subcategory")
-async def remove_subcategory(interaction: discord.Interaction, category: str, name: str):
-    subs = custom_subcategories.get(category)
-    if subs and name in subs:
-        del subs[name]
-        if not subs:
-            del custom_subcategories[category]
-        await interaction.response.send_message(f"Subcategory **{name}** removed from **{category}**.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"Subcategory **{name}** not found under **{category}**.", ephemeral=True)
-
-
-@tree.command(name="sync-categories", description="Write all categories to the Categories sheet tab")
-async def sync_categories(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+@tree.command(name="add-product", description="Add a new product to the inventory matrix")
+async def add_product(interaction: discord.Interaction, product: str, size: str = ""):
+    await interaction.response.defer()
     try:
-        sync_categories_tab(all_keywords(custom_categories), all_subcategories(custom_subcategories))
-        await interaction.followup.send("Categories synced to the **Categories** sheet tab.", ephemeral=True)
+        existing = find_product_row(product)
+        if existing is not None:
+            await interaction.followup.send(f"Product **{product}** already exists at row {existing}.")
+            return
+        add_product_row(product, size)
+        log_entry(product, "0", "Product added")
+        await interaction.followup.send(f"Product **{product}** added{ ' (size: ' + size + ')' if size else ''}.")
     except Exception as e:
-        await interaction.followup.send(f"Sync failed: {e}", ephemeral=True)
+        await interaction.followup.send(f"Error: {str(e)[:500]}")
+
+
+@tree.command(name="add-variant", description="Add a new variant column to the inventory matrix")
+async def add_variant(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
+    try:
+        add_variant_column(name)
+        await interaction.followup.send(f"Variant **{name}** added as a new column.")
+    except ValueError as e:
+        await interaction.followup.send(str(e))
+    except Exception as e:
+        await interaction.followup.send(f"Error: {str(e)[:500]}")
+
+
+@tree.command(name="rename-variant", description="Rename a variant column")
+async def rename_variant(interaction: discord.Interaction, old: str, new: str):
+    await interaction.response.defer()
+    try:
+        rename_variant_column(old, new)
+        await interaction.followup.send(f"Variant **{old}** renamed to **{new}**.")
+    except ValueError as e:
+        await interaction.followup.send(str(e))
+    except Exception as e:
+        await interaction.followup.send(f"Error: {str(e)[:500]}")
 
 
 @tree.command(name="sheet", description="Get the Google Sheet link")
 async def sheet(interaction: discord.Interaction):
     await interaction.response.send_message(SHEET_URL)
-
-
-@tree.command(name="recent", description="Show recent inventory entries")
-async def recent(interaction: discord.Interaction, n: int = 5):
-    try:
-        rows = get_recent(n)
-        if not rows:
-            await interaction.response.send_message("No entries yet.")
-            return
-
-        lines = []
-        for row in reversed(rows):
-            padded = row + [""] * (7 - len(row))
-            item, cat, subcat, qty, date_ = padded[0], padded[1], padded[2], padded[3], padded[4]
-            cat_str = f"{cat} > {subcat}" if subcat else cat
-            lines.append(f"**{item}** | {qty}x {cat_str} — {date_}")
-
-        embed = discord.Embed(
-            title=f"Last {len(rows)} Entries",
-            description="\n".join(lines),
-            color=discord.Color.purple(),
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    except Exception as e:
-        msg = str(e)[:500]
-        await interaction.response.send_message(f"Error: {msg}", ephemeral=True)
-
-
-@tree.command(name="toggle-ai", description="Enable or disable AI categorization")
-async def toggle_ai(interaction: discord.Interaction):
-    global ai_enabled
-    ai_enabled = not ai_enabled
-    status = "enabled" if ai_enabled else "disabled"
-    await interaction.response.send_message(f"AI categorization {status}.", ephemeral=True)
-
-
-@tree.command(name="diag", description="Test Google Sheets connection")
-async def diag(interaction: discord.Interaction):
-    try:
-        from config import get_google_credentials
-        try:
-            creds = get_google_credentials()
-            email = creds.get("client_email", "MISSING")
-        except Exception as e:
-            await interaction.response.send_message(f"Credentials error: {e}", ephemeral=True)
-            return
-
-        from google.auth.transport.requests import Request as AuthRequest
-        from google.oauth2.service_account import Credentials
-        import requests
-
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ]
-        credentials = Credentials.from_service_account_info(creds, scopes=scopes)
-        credentials.refresh(AuthRequest())
-
-        session = requests.Session()
-        session.headers.update({"Authorization": f"Bearer {credentials.token}"})
-        resp = session.get(f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}")
-        if resp.status_code == 200:
-            data = resp.json()
-            title = data.get("properties", {}).get("title", "?")
-            await interaction.response.send_message(
-                f"**Connected**\nSheet: {title}\nEmail: {email}",
-                ephemeral=True,
-            )
-        else:
-            await interaction.response.send_message(
-                f"**Cannot open sheet** (HTTP {resp.status_code})\n"
-                f"Email: {email}\nSheet ID: {SHEET_ID}\n\n"
-                f"1. Open {SHEET_URL}\n"
-                f"2. Click Share\n"
-                f"3. Add `{email}` as Editor\n"
-                f"4. Verify API enabled:\n"
-                f"   https://console.cloud.google.com/apis/library/sheets.googleapis.com",
-                ephemeral=True,
-            )
-    except Exception as e:
-        await interaction.response.send_message(f"Diagnostic error: {e}", ephemeral=True)

@@ -7,7 +7,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Startup diagnostics (wrapped so bot always starts)
 try:
     logger.info("--- Startup Diagnostics ---")
     logger.info("Python version: %s", sys.version)
@@ -55,7 +54,6 @@ try:
 except Exception as e:
     logger.error("Startup diagnostic error: %s", e)
 
-# Start the bot
 import bot.discord_bot
 import bot.handlers
 from bot.discord_bot import bot
