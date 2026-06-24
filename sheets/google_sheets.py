@@ -172,6 +172,19 @@ def list_variants() -> list[str]:
     return [name for name, _ in _variant_headers(session, sheet_name)]
 
 
+def _to_int(raw) -> int:
+    if raw is None:
+        return 0
+    s = str(raw).strip()
+    if not s:
+        return 0
+    s = s.replace(",", "").replace("$", "")
+    try:
+        return int(float(s))
+    except (ValueError, TypeError):
+        return 0
+
+
 def matrix_read_cell(product: str, variant: str) -> int:
     row = find_product_row(product)
     col = find_variant_col(variant)
@@ -183,9 +196,7 @@ def matrix_read_cell(product: str, variant: str) -> int:
     range_ = _range(sheet_name, f"{col}{row}")
     resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
     raw = resp.json().get("values", [[None]])[0][0]
-    if raw is None or str(raw).strip() == "":
-        return 0
-    return int(float(str(raw).replace(",", "").replace("$", "")))
+    return _to_int(raw)
 
 
 def matrix_write_cell(product: str, variant: str, value: int):
@@ -222,14 +233,8 @@ def matrix_get(product: str) -> dict[str, int]:
     values = resp.json().get("values", [[]])[0]
     result = {}
     for i, (name, _) in enumerate(variants):
-        if i < len(values):
-            raw = values[i]
-            if raw and str(raw).strip():
-                result[name] = int(float(str(raw).replace(",", "").replace("$", "")))
-            else:
-                result[name] = 0
-        else:
-            result[name] = 0
+        raw = values[i] if i < len(values) else None
+        result[name] = _to_int(raw)
     return result
 
 
