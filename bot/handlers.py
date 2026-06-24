@@ -115,7 +115,7 @@ async def set_(interaction: discord.Interaction, product: str, items: str):
     await _process_items(interaction, product, items, "set")
 
 
-@tree.command(name="stock", description="Show current totals for a product")
+@tree.command(name="stock", description="Show current stock for a product (e.g. BPP09)")
 async def stock(interaction: discord.Interaction, product: str):
     await interaction.response.defer()
     try:

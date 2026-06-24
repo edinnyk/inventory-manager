@@ -568,3 +568,42 @@ Applied in both `matrix_get()` and `matrix_read_cell()`.
 ### Files changed
 - `sheets/google_sheets.py` — added `_to_int()`, updated `matrix_get()`
   and `matrix_read_cell()` to use it
+
+---
+
+## P17 — `_variant_headers()` scans A:ZZ, picks up non-variant labels as columns
+
+**Date:** Session 3
+**Status:** Resolved
+
+### Problem
+After the P11 fix changed `_variant_headers()` to scan from A1:ZZ1 instead of
+E1:ZZ1, columns A (blank label) and B ("Product") were treated as variants.
+This broke `/stock` — the wrong columns were read as variants, so products
+couldn't be found or showed wrong data.
+
+### What was attempted
+1. Added more entries to `NON_VARIANT_HEADERS` ("product", "item", "notes",
+   "total") as a safety net
+2. Restored the scan to start at E1, keeping the `_variant_headers` pattern
+   but limiting the range to columns E+ (where actual variants live)
+
+### Root cause
+`_variant_headers()` needs to ignore columns A-D (product info/metadata) and
+only scan E+ for variants. The earlier change widened the scan to A1:ZZ1
+without accounting for non-variant labels in those columns.
+
+### Solution
+Two changes:
+
+1. **`_variant_headers()`** — scan range changed back to `E1:ZZ1`, column
+   letter calculation uses `_col_letter(5 + i)` (E=5). The
+   `NON_VARIANT_HEADERS` filter is kept for safety against any metadata
+   labels that might appear in E+.
+
+2. **`NON_VARIANT_HEADERS`** — broadened to include `"product"`, `"item"`,
+   `"notes"`, `"total"` for future-proofing.
+
+### Files changed
+- `sheets/google_sheets.py` — `_variant_headers()` range back to E1:ZZ1
+- `sheets/schema.py` — `NON_VARIANT_HEADERS` expanded

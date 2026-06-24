@@ -98,14 +98,14 @@ def _last_data_row(session, sheet_name, column="B"):
 
 
 def _variant_headers(session, sheet_name):
-    range_ = _range(sheet_name, "A1:ZZ1")
+    range_ = _range(sheet_name, "E1:ZZ1")
     resp = session.get(f"{API_BASE}/{SHEET_ID}/values/{range_}")
     headers = resp.json().get("values", [[]])[0]
     variants = []
     for i, h in enumerate(headers):
         name = str(h).strip()
         if name and name.lower() not in NON_VARIANT_HEADERS:
-            variants.append((name, _col_letter(i + 1)))
+            variants.append((name, _col_letter(5 + i)))
     return variants
 
 
