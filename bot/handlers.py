@@ -1,3 +1,4 @@
+import logging
 import os
 
 import discord
@@ -18,6 +19,8 @@ from sheets.google_sheets import (
     product_info,
     rename_variant_column,
 )
+
+logger = logging.getLogger(__name__)
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
 
 
@@ -146,6 +149,24 @@ async def stock(interaction: discord.Interaction, product: str):
         await interaction.followup.send(str(e))
     except Exception as e:
         await interaction.followup.send(f"Error: {str(e)[:500]}")
+
+
+@tree.command(name="debug", description="Show raw variant column mapping")
+async def debug(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        from sheets.google_sheets import _variant_headers, _tab_info
+        session, sheet_name, _ = _tab_info("Inventory")
+        variants = _variant_headers(session, sheet_name)
+        lines = [f"**{name}** → `{col}`" for name, col in variants]
+        embed = discord.Embed(
+            title="Variant Column Mapping",
+            description="\n".join(lines) if lines else "No variants found",
+            color=discord.Color.greyple(),
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"Error: {str(e)[:500]}", ephemeral=True)
 
 
 @tree.command(name="log", description="Show recent audit log entries for a product")
