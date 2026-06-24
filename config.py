@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import zoneinfo
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,6 +21,9 @@ if not SHEET_ID:
 m = re.search(r"/d/([a-zA-Z0-9_-]+)", SHEET_ID)
 if m:
     SHEET_ID = m.group(1)
+
+TIMEZONE_NAME = os.getenv("TIMEZONE", "Pacific/Honolulu")
+TIMEZONE = zoneinfo.ZoneInfo(TIMEZONE_NAME)
 
 _google_creds_cache: dict | None = None
 
@@ -47,7 +51,3 @@ def get_google_credentials() -> dict:
     raise ValueError(
         "GOOGLE_SERVICE_ACCOUNT_JSON is neither valid JSON nor an existing file path"
     )
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
-AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.openai.com/v1")

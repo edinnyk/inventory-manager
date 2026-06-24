@@ -498,3 +498,36 @@ Stored in memory (custom_categories-style dict) or in a config sheet tab.
 ### Files relevant
 - `sheets/google_sheets.py` — all functions that reference column positions
 - `bot/handlers.py` — new `/layout` command
+
+---
+
+## P15 — Audit log timestamps are UTC, not local time
+
+**Date:** Session 3
+**Status:** Resolved
+
+### Problem
+All audit log entries showed UTC timestamps (e.g., `2026-06-22 04:30`) even
+though the user operates in Hawaii time (UTC-10). The timestamps were
+misleading when trying to understand when inventory changes happened.
+
+### What was attempted
+Added `TIMEZONE` env var support:
+
+1. `config.py` — added `zoneinfo.ZoneInfo` import, reads `TIMEZONE` env var
+   (default `"Pacific/Honolulu"`)
+2. `sheets/google_sheets.py` — `datetime.now(TIMEZONE)` replaces
+   `datetime.now()` in `log_entry()`
+
+### Root cause
+`datetime.now()` returns UTC when called without a timezone argument.
+
+### Solution
+Use `datetime.now(TIMEZONE)` with the timezone loaded from the `TIMEZONE`
+environment variable. Each Railway project sets its own `TIMEZONE` (e.g.,
+`Pacific/Honolulu`, `America/New_York`) and the bot writes localized
+timestamps to the audit log.
+
+### Files changed
+- `config.py` — added `TIMEZONE_NAME`, `TIMEZONE` globals using `zoneinfo`
+- `sheets/google_sheets.py` — `log_entry()` uses `datetime.now(TIMEZONE)`

@@ -6,7 +6,7 @@ import requests
 from google.auth.transport.requests import Request as AuthRequest
 from google.oauth2.service_account import Credentials
 
-from config import SHEET_ID, get_google_credentials
+from config import SHEET_ID, TIMEZONE, get_google_credentials
 from sheets.schema import HEADERS, NON_VARIANT_HEADERS
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ def _variant_headers(session, sheet_name):
 def log_entry(item: str, delta: str, notes: str):
     session, sheet_name, sheet_id = _tab_info("Audit Log", auto_create=True)
     _ensure_audit_headers(session, sheet_name, sheet_id)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M")
     range_ = _range(sheet_name, "A:D")
     body = {"values": [[item, delta, now, notes]]}
     resp = session.post(
