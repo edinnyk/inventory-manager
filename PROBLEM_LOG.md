@@ -531,3 +531,40 @@ timestamps to the audit log.
 ### Files changed
 - `config.py` — added `TIMEZONE_NAME`, `TIMEZONE` globals using `zoneinfo`
 - `sheets/google_sheets.py` — `log_entry()` uses `datetime.now(TIMEZONE)`
+
+---
+
+## P16 — `/stock` crashes on non-numeric cell values
+
+**Date:** Session 3
+**Status:** Resolved
+
+### Problem
+Running `/stock BPP09` crashed with:
+```
+ValueError: could not convert string to float
+```
+Also affected `/add`, `/sub`, `/set` via `matrix_read_cell()`. Any cell
+containing text like "N/A", "-", or an empty string that wasn't handled
+would cause a full crash.
+
+### What was attempted
+Replaced the inline `int(float(str(raw).replace(...)))` conversion with
+a dedicated `_to_int()` helper.
+
+### Root cause
+`int(float("N/A"))` raises `ValueError`. The conversion assumed every cell
+value was parseable as a number, but sheets often contain placeholders,
+notes, or stray characters.
+
+### Solution
+Added `_to_int(raw)` helper:
+1. Returns `0` for `None` and empty string
+2. Strips commas and `$` prefixes
+3. Returns `0` if `int(float(s))` raises any exception
+
+Applied in both `matrix_get()` and `matrix_read_cell()`.
+
+### Files changed
+- `sheets/google_sheets.py` — added `_to_int()`, updated `matrix_get()`
+  and `matrix_read_cell()` to use it
