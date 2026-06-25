@@ -607,3 +607,32 @@ Two changes:
 ### Files changed
 - `sheets/google_sheets.py` — `_variant_headers()` range back to E1:ZZ1
 - `sheets/schema.py` — `NON_VARIANT_HEADERS` expanded
+
+---
+
+## P18 — Optional reason field for `/sub` audit trail
+
+**Date:** Session 3
+**Status:** Resolved
+
+### Problem
+When subtracting inventory (`/sub`), the audit log showed the quantity change
+but not WHY it was removed (defective, sold, sample, damaged, etc.). This
+made it hard to trace inventory loss patterns.
+
+### Solution
+Added an optional `reason` parameter to `/sub`:
+
+```
+/sub product: BPP09 items: 2 maple
+/sub product: BPP09 items: 2 maple reason: defective
+/sub product: BPP09 items: 2 maple reason: sample for client
+```
+
+- Reason appears in the audit log notes appended after the quantity summary
+- Reason is displayed as a separate field in the Discord response embed
+- `/sub` embed color changed to orange to visually distinguish from `/add`
+- The field is optional — omitting it works exactly like before
+
+### Files changed
+- `bot/handlers.py` — `/sub` command definition, `_process_items`, embed

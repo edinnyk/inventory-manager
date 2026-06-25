@@ -33,6 +33,7 @@ async def _process_items(
     product: str,
     items_text: str,
     operation: str,
+    reason: str = "",
 ):
     await interaction.response.defer()
     try:
@@ -80,6 +81,8 @@ async def _process_items(
 
         if lines:
             notes = "; ".join(lines)
+            if reason:
+                notes += f" — {reason}"
             total_delta = sum(
                 qty for var_name, qty in pairs
                 if var_lookup.get(var_name.lower()) is not None
@@ -88,10 +91,12 @@ async def _process_items(
 
         embed = discord.Embed(
             title=f"{operation.title()} — {product}",
-            color=discord.Color.green(),
+            color=discord.Color.green() if operation != "sub" else discord.Color.orange(),
         )
         if lines:
             embed.description = "\n".join(lines)
+        if reason:
+            embed.add_field(name="Reason", value=reason, inline=False)
         if errors:
             embed.add_field(name="Errors", value="\n".join(errors), inline=False)
 
@@ -109,8 +114,8 @@ async def add(interaction: discord.Interaction, product: str, items: str):
 
 
 @tree.command(name="sub", description="Subtract quantity from product variants")
-async def sub(interaction: discord.Interaction, product: str, items: str):
-    await _process_items(interaction, product, items, "sub")
+async def sub(interaction: discord.Interaction, product: str, items: str, reason: str = ""):
+    await _process_items(interaction, product, items, "sub", reason)
 
 
 @tree.command(name="set", description="Set exact quantity for product variants")
